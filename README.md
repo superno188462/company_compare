@@ -12,7 +12,7 @@
 
 ## 现在做到哪里
 
-**已完成规格与代码骨架，还没有可操作页面。** 前后端类型和接口声明已建立；Python 业务函数仍为 `raise NotImplementedError()`，真实天眼查和模型服务尚未接入。
+**前端采用 React + TypeScript + Vite，已能启动工作台外壳。** 页面提供布局预览与官网外链；搜索、证据处理和报告生成尚未接入。Python 业务函数仍为 `raise NotImplementedError()`，真实天眼查和模型服务尚未接入。
 
 下一步围绕这条主线准备契约测试，再用模拟企业数据和模拟报告服务打通页面与后端。随后接入真实服务，补齐共享快照、会话期限和异常恢复等已约定能力。模拟数据页面需要明确标注演示数据。
 
@@ -33,12 +33,23 @@
 ```text
 src/company_screening/   企业筛查业务：模型、服务、外部依赖接口
 backend/                 HTTP 接口与应用装配
-frontend/src/            页面类型、状态与 API 调用接口
+frontend/src/            React 页面外壳、组件契约、状态与 API 调用接口
 contracts/               输入输出 Schema 与固定文案
 specs/                   分析方法、需求与开发规格
 tests/                   验收场景及后续测试
 scripts/                 类型生成与骨架检查工具
 ```
+
+## 启动前端
+
+```powershell
+npm --prefix frontend ci
+npm --prefix frontend run dev
+```
+
+打开终端显示的本地地址（默认 `http://127.0.0.1:5173`）。当前为骨架预览，搜索按钮禁用，不发起业务请求。页面入口为 `frontend/src/App.tsx`；既有组件 Props 通过 `components/registry.ts` 绑定 React 组件类型，后续实现沿用同一套契约。
+
+生产构建使用 `npm --prefix frontend run build`，产物位于 `frontend/dist/`；`npm --prefix frontend run preview` 可本地预览构建结果。部署目录为 `dist/`，前端不放置天眼查或模型密钥。
 
 ## 开发检查
 
@@ -50,6 +61,7 @@ npm --prefix frontend ci
 uv run mypy
 uv run python scripts/check_skeleton.py
 npm --prefix frontend run typecheck
+npm --prefix frontend run build
 ```
 
 `contracts/` 中两个 JSON Schema 是字段定义的权威来源；生成类型由 `uv run python scripts/generate_contracts.py` 更新，不手改 `generated.py` 或 `generated.ts`。共享行为语义见 [global_schema.md](specs/common/global_schema.md)。

@@ -27,7 +27,7 @@
 
 - `src/` 与 `backend/` 内的31个函数/方法，除 docstring 外均只有 `raise NotImplementedError()`。
 - Pydantic 只声明类型、必填、长度、枚举、模式与基础模型配置，没有自定义业务校验器、数据库、模型客户端或网络请求。
-- 前端只有类型和接口，未实现页面、fetch、自动确认、共享、复制或官网导航行为。
+- 前端已按用户指定采用 React + TypeScript + Vite，可预览初始外壳与固定官网新标签页链接；既有组件 Props 绑定到 React 类型，业务状态、fetch、自动确认、共享和复制仍未实现。页面没有企业数据，搜索禁用。
 - 开发工具 `scripts/generate_contracts.py` 和 `scripts/check_skeleton.py` 包含离线生成/检查逻辑，不是应用业务逻辑。
 - 测试目录只保留下一阶段位置，正式契约测试尚未编写。
 
@@ -43,10 +43,14 @@ JSON Schema 为权威，Pydantic/TS 是声明投影。生成工具展开原有�
 | --- | --- |
 | `uv run mypy` | 严格模式通过，12个应用/后端源文件 |
 | `uv run python scripts/check_skeleton.py` | 31个未实现函数、13个服务签名、3个端口签名、13个路由、模型字段/必填性及 Schema 往返检查通过 |
-| `npm --prefix frontend run typecheck` | TypeScript 严格检查通过，无 emit |
+| `npm --prefix frontend run typecheck` | TypeScript / React TSX 严格检查通过，无 emit |
+| `npm --prefix frontend run build` | Vite 生产构建通过，生成 `frontend/dist/` |
+| React 外壳浏览器检查 | 本机 Chrome 无头模式检查开发服务及生产预览：1440px/360px 布局、无横向溢出、禁用搜索、3个安全官网外链与键盘跳转通过；无浏览器报错、无主动外部请求 |
 | 导入检查 | 模型、应用服务、端口、异常和 HTTP 模块可导入，不启动真实服务 |
 
-实际业务、真实提供方、LLM、浏览器、权限/存储/清理尚未实现或验证。上述检查不能替代后续契约测试。
+实际业务、真实提供方、LLM、权限/存储/清理尚未实现或验证；官网站点实际可用性、业务交互和其他浏览器兼容尚未验证。上述外壳检查不能替代后续契约测试。
+
+React 工程调整：新增 `main.tsx` 挂载入口、`App.tsx` 初始外壳、样式和 Vite 配置；9 组组件 Props 通过 `components/registry.ts` 引用原定义。API Client、Schema、后端签名及业务基线未变。前端增加 `dev / build / preview` 命令，实际检查结果见上表。页面内新增的说明属于开发外壳预览，不将其视为正式产品文案或已完成的业务组件。
 
 ## 待开发者评审
 
