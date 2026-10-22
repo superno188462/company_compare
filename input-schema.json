@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://company-screening.invalid/schemas/input-schema.json",
+  "title": "企业公开线索分析节点输入 v1.0",
+  "description": "仅允许受控主体、已接纳证据和查询覆盖。所有引用由本地注册表解析，不请求 schema 地址。跨字段业务约束见 specs/common/global_schema.md。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["subject", "evidence_list", "api_status"],
+  "properties": {
+    "subject": {"$ref": "#/$defs/Subject"},
+    "evidence_list": {
+      "type": "array", "minItems": 1, "maxItems": 200,
+      "description": "仅已接纳证据；空包不得调用分析节点。",
+      "items": {"$ref": "#/$defs/Evidence"}
+    },
+    "api_status": {"$ref": "#/$defs/QueryCoverage"}
+  },
+  "$defs": {
+    "CreditCode": {
+      "type": "string", "pattern": "^[0-9ABCDEFGHJKLMNPQRTUWXY]{18}$",
+      "description": "18 位大写统一社会信用代码；格式通过不证明已登记或材料真实。"
+    },
+    "Timestamp": {
+      "type": "string", "format": "date-time",
+      "description": "含时区的 RFC3339 时间；存储/比较统一 UTC，显示 Asia/Shanghai。"
+    },
+    "NullableTimestamp": {"anyOf": [{"$ref": "#/$defs/Timestamp"}, {"type": "null"}]},
+    "HttpUrl": {
+      "type": "string", "format": "uri", "maxLength": 2048,
+      "pattern": "^https?://[^\\s]+$",
+      "description": "仅 HTTP(S) 定位链接；不访问、抓取或验证页面。运行时还须拒绝 URL 用户信息和控制字符。"
+    },
+    "NullableUrl": {"anyOf": [{"$ref": "#/$defs/HttpUrl"}, {"type": "null"}]},
+    "NullableText": {"type": ["string", "null"], "minLength": 1, "maxLength": 256},
+    "EvidenceId": {"type": "string", "pattern": "^E-[A-Z0-9-]{1,60}$"},
+    "Category": {"type": "string", "enum": ["basic", "abnormal", "penalty", "judicial", "asset"]},
+    "SourceHint": {"type": "string", "enum": ["SOURCE_TIANYAN", "SOURCE_USER_OTHER", "SOURCE_USER_SELF"]},
+    "Subject": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "credit_code", "registered_region", "legal_representative", "established_on", "confirmed_at"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 200, "description": "已确认企业全称。"},
+        "credit_code": {"$ref": "#/$defs/CreditCode"},
+        "registered_region": {"$ref": "#/$defs/NullableText", "description": "注册省市；未取得时为 null。"},
+        "legal_representative": {"$ref": "#/$defs/NullableText", "description": "法定代表人；不等于实际控制人。"},
+        "established_on": {"type": ["string", "null"], "format": "date", "description": "成立日期；未知为 null。"},
+        "confirmed_at": {"$ref": "#/$defs/Timestamp", "description": "用户人工确认时由服务端记录。"}
+      }
+    },
+    "Evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_id", "subject_credit_code", "category", "content", "source", "snapshot_time", "captured_at", "event_time", "source_url", "source_publisher", "provider_record_id", "origin_id", "derived_from", "verification_status", "hint_id"],
+      "properties": {
+        "evidence_id": {"$ref": "#/$defs/EvidenceId"},
+        "subject_credit_code": {"$ref": "#/$defs/CreditCode"},
+        "category": {"anyOf": [{"$ref": "#/$defs/Category"}, {"const": "other"}], "description": "取得类别；用户未分类用 other，不由模型补造分类。"},
+        "content": {"type": "string", "minLength": 1, "maxLength": 4000, "description": "实际取得或用户提交的内容，不允许静默截断。"},
+        "source": {"type": "string", "enum": ["tianyan", "user_other", "user_self"]},
+        "snapshot_time": {"$ref": "#/$defs/NullableTimestamp", "description": "接口实际取得时间或用户声明的来源查看时间，不是事件发生时间。"},
+        "captured_at": {"$ref": "#/$defs/Timestamp", "description": "本会话接纳证据的服务端时间。"},
+        "event_time": {"$ref": "#/$defs/NullableText", "description": "来源明确给出的事件时间/期间原文；不确定时 null，不用采集时间替代。"},
+        "source_url": {"$ref": "#/$defs/NullableUrl"},
+        "source_publisher": {"$ref": "#/$defs/NullableText", "description": "来源所声明的原始发布者；不代表应用已核验。"},
+        "provider_record_id": {"$ref": "#/$defs/NullableText", "description": "提供方记录 ID/案号等定位；无则 null。"},
+        "origin_id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "同一原始材料及其衍生记录共享根标识，不代表相互独立。"},
+        "derived_from": {"anyOf": [{"$ref": "#/$defs/EvidenceId"}, {"type": "null"}], "description": "直接衍生记录编号；可指向本包之外的原快照记录，不能伪造为本包引用。"},
+        "verification_status": {"const": "original_not_verified", "description": "首版不程序核验官方原文，所有渠道保留此限制。"},
+        "hint_id": {"$ref": "#/$defs/SourceHint"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"source": {"const": "tianyan"}}, "required": ["source"]},
+          "then": {"properties": {"hint_id": {"const": "SOURCE_TIANYAN"}, "snapshot_time": {"$ref": "#/$defs/Timestamp"}}}
+        },
+        {
+          "if": {"properties": {"source": {"const": "user_other"}}, "required": ["source"]},
+          "then": {"properties": {"hint_id": {"const": "SOURCE_USER_OTHER"}, "snapshot_time": {"$ref": "#/$defs/Timestamp"}, "source_url": {"$ref": "#/$defs/HttpUrl"}}}
+        },
+        {
+          "if": {"properties": {"source": {"const": "user_self"}}, "required": ["source"]},
+          "then": {"properties": {"hint_id": {"const": "SOURCE_USER_SELF"}}}
+        }
+      ]
+    },
+    "CategoryResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "record_count", "queried_at", "scope_description", "error_code"],
+      "properties": {
+        "status": {"type": "string", "enum": ["ok", "empty", "error", "not_requested"]},
+        "record_count": {"type": "integer", "minimum": 0, "maximum": 200},
+        "queried_at": {"$ref": "#/$defs/NullableTimestamp"},
+        "scope_description": {"type": "string", "minLength": 1, "maxLength": 500, "description": "本类别实际接口/子范围及期间覆盖；不能把一个子接口说成全部司法/资产记录。"},
+        "error_code": {"type": ["string", "null"], "enum": [null, "UPSTREAM_TIMEOUT", "UPSTREAM_AUTH", "UPSTREAM_LIMIT", "UPSTREAM_ERROR", "UPSTREAM_INVALID", "UPSTREAM_INCOMPLETE", "SUBJECT_RESPONSE_MISMATCH"]}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "ok"}}}, "then": {"properties": {"record_count": {"minimum": 1}, "queried_at": {"$ref": "#/$defs/Timestamp"}, "error_code": {"type": "null"}}}},
+        {"if": {"properties": {"status": {"const": "empty"}}}, "then": {"properties": {"record_count": {"const": 0}, "queried_at": {"$ref": "#/$defs/Timestamp"}, "error_code": {"type": "null"}}}},
+        {"if": {"properties": {"status": {"const": "error"}}}, "then": {"properties": {"record_count": {"const": 0}, "queried_at": {"$ref": "#/$defs/Timestamp"}, "error_code": {"type": "string"}}}},
+        {"if": {"properties": {"status": {"const": "not_requested"}}}, "then": {"properties": {"record_count": {"const": 0}, "queried_at": {"type": "null"}, "error_code": {"type": "null"}}}}
+      ]
+    },
+    "CategoryResults": {
+      "type": "object", "additionalProperties": false,
+      "required": ["basic", "abnormal", "penalty", "judicial", "asset"],
+      "properties": {
+        "basic": {"$ref": "#/$defs/CategoryResult"},
+        "abnormal": {"$ref": "#/$defs/CategoryResult"},
+        "penalty": {"$ref": "#/$defs/CategoryResult"},
+        "judicial": {"$ref": "#/$defs/CategoryResult"},
+        "asset": {"$ref": "#/$defs/CategoryResult"}
+      }
+    },
+    "QueryCoverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tianyan_status", "planned_categories", "categories"],
+      "properties": {
+        "tianyan_status": {"type": "string", "enum": ["ok", "empty", "error", "partial"]},
+        "planned_categories": {"type": "array", "minItems": 1, "maxItems": 5, "uniqueItems": true, "items": {"$ref": "#/$defs/Category"}},
+        "categories": {"$ref": "#/$defs/CategoryResults"}
+      }
+    }
+  }
+}

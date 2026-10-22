@@ -1,0 +1,14 @@
+{
+  "name": "company-screening-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "企业公开线索工作台的契约类型和组件 Props 骨架",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "^16.0.0",
+    "typescript": "^7.0.2"
+  }
+}

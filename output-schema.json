@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://company-screening.invalid/schemas/output-schema.json",
+  "title": "企业公开线索工作流完整结果 v1.0",
+  "description": "已确认主体后的完整工作台结果；搜索、草稿和进度响应的其他边界见后端 SDD。仅本地解析 input-schema.json 引用。",
+  "type": "object", "additionalProperties": false,
+  "required": ["subject", "evidence_list", "summary_text", "api_status", "ui_hint_group"],
+  "properties": {
+    "subject": {"$ref": "input-schema.json#/$defs/Subject"},
+    "evidence_list": {"type": "array", "maxItems": 200, "items": {"$ref": "input-schema.json#/$defs/Evidence"}},
+    "summary_text": {"type": "string", "maxLength": 20000, "description": "接收通过的 LLM 报告原文；无成功报告时为空字符串，旧报告须由版本字段明确标识。"},
+    "api_status": {"$ref": "#/$defs/WorkflowStatus"},
+    "ui_hint_group": {"type": "array", "uniqueItems": true, "maxItems": 40, "items": {"$ref": "#/$defs/HintCode"}}
+  },
+  "$defs": {
+    "HintCode": {
+      "type": "string",
+      "enum": ["DISCLOSURE_LIMITED", "CONFIRM_SUBJECT", "SOURCE_TIANYAN", "SOURCE_USER_OTHER", "SOURCE_USER_SELF", "PARTIAL_COVERAGE", "QUERY_EMPTY", "QUERY_ERROR", "NO_EVIDENCE", "SNAPSHOT_UNVERIFIED", "SNAPSHOT_CONFIRM_REQUIRED", "SNAPSHOT_EXPIRED", "SNAPSHOT_QUERY_FAILED", "CREDIT_MISSING", "CREDIT_MISMATCH", "CREDIT_CONFLICT", "SOURCE_INFO_MISSING", "SHARE_FAILED", "SHARE_SAVED", "SHARE_WITHDRAWN", "EVIDENCE_SAVED", "REPORT_FAILED", "REPORT_INVALID", "REPORT_STALE", "SESSION_EXPIRED", "SUBJECT_CHANGED", "SEARCH_EMPTY", "SEARCH_FAILED", "DUPLICATE_PENDING", "OPERATION_CONFLICT", "SUBJECT_MISMATCH", "LIMIT_EXCEEDED", "OPEN_OFFICIAL_MANUALLY", "INTERNAL_ERROR"]
+    },
+    "SnapshotDraft": {
+      "type": "object", "additionalProperties": false,
+      "required": ["snapshot_id", "evidence", "shared_at", "expires_at"],
+      "properties": {
+        "snapshot_id": {"type": "string", "format": "uuid"},
+        "evidence": {"allOf": [{"$ref": "input-schema.json#/$defs/Evidence"}, {"properties": {"source": {"const": "user_other"}, "hint_id": {"const": "SOURCE_USER_OTHER"}}}]},
+        "shared_at": {"$ref": "input-schema.json#/$defs/Timestamp"},
+        "expires_at": {"$ref": "input-schema.json#/$defs/Timestamp"}
+      }
+    },
+    "SubmissionReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["operation_id", "evidence_id", "share_status", "share_receipt_id"],
+      "properties": {
+        "operation_id": {"type": "string", "format": "uuid"},
+        "evidence_id": {"$ref": "input-schema.json#/$defs/EvidenceId"},
+        "share_status": {"type": "string", "enum": ["not_requested", "saved", "error"]},
+        "share_receipt_id": {"type": ["string", "null"], "format": "uuid", "description": "定位回执，不是越权访问凭据；撤回仍需验证提交者身份。"}
+      },
+      "allOf": [
+        {"if": {"properties": {"share_status": {"const": "saved"}}}, "then": {"properties": {"share_receipt_id": {"type": "string", "format": "uuid"}}}, "else": {"properties": {"share_receipt_id": {"type": "null"}}}}
+      ]
+    },
+    "WorkflowStatus": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tianyan_status", "planned_categories", "categories", "session_id", "session_generation", "operation_id", "result_revision", "evidence_version", "summary_evidence_version", "summary_generated_at", "llm_status", "snapshot_status", "snapshot_draft", "last_submission"],
+      "properties": {
+        "tianyan_status": {"$ref": "input-schema.json#/$defs/QueryCoverage/properties/tianyan_status"},
+        "planned_categories": {"$ref": "input-schema.json#/$defs/QueryCoverage/properties/planned_categories"},
+        "categories": {"$ref": "input-schema.json#/$defs/CategoryResults"},
+        "session_id": {"type": "string", "format": "uuid", "description": "公开定位标识；不能单独授权读取会话。"},
+        "session_generation": {"type": "integer", "minimum": 1, "description": "确认切换主体后递增。"},
+        "operation_id": {"type": "string", "format": "uuid"},
+        "result_revision": {"type": "integer", "minimum": 1, "description": "同一主体代次中单调递增的工作台状态修订。"},
+        "evidence_version": {"type": "integer", "minimum": 0, "description": "主体确认后的分析输入版本；证据或查询覆盖改变时递增。"},
+        "summary_evidence_version": {"type": ["integer", "null"], "minimum": 0, "description": "summary_text 实际对应的版本；无成功报告时为 null。"},
+        "summary_generated_at": {"$ref": "input-schema.json#/$defs/NullableTimestamp"},
+        "llm_status": {"type": "string", "enum": ["not_started", "running", "success", "error", "invalid_output", "skipped_no_evidence"]},
+        "snapshot_status": {"type": "string", "enum": ["not_checked", "miss", "available", "used", "error"]},
+        "snapshot_draft": {"anyOf": [{"$ref": "#/$defs/SnapshotDraft"}, {"type": "null"}], "description": "待确认预填充，仅为草稿，不属于 evidence_list。"},
+        "last_submission": {"anyOf": [{"$ref": "#/$defs/SubmissionReceipt"}, {"type": "null"}]}
+      },
+      "allOf": [
+        {"if": {"properties": {"snapshot_status": {"const": "available"}}}, "then": {"properties": {"tianyan_status": {"const": "empty"}, "snapshot_draft": {"$ref": "#/$defs/SnapshotDraft"}}}, "else": {"properties": {"snapshot_draft": {"type": "null"}}}},
+        {"if": {"properties": {"llm_status": {"const": "success"}}}, "then": {"properties": {"summary_evidence_version": {"type": "integer"}, "summary_generated_at": {"$ref": "input-schema.json#/$defs/Timestamp"}}}}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"api_status": {"properties": {"summary_evidence_version": {"type": "null"}}}}},
+      "then": {"properties": {"summary_text": {"const": ""}, "api_status": {"properties": {"summary_generated_at": {"type": "null"}}}}},
+      "else": {"properties": {"summary_text": {"minLength": 1}, "api_status": {"properties": {"summary_generated_at": {"$ref": "input-schema.json#/$defs/Timestamp"}}}}}
+    },
+    {
+      "if": {"properties": {"api_status": {"properties": {"llm_status": {"const": "skipped_no_evidence"}}}}},
+      "then": {"properties": {"evidence_list": {"maxItems": 0}, "summary_text": {"const": ""}, "api_status": {"properties": {"summary_evidence_version": {"type": "null"}, "summary_generated_at": {"type": "null"}}}}}
+    }
+  ]
+}
