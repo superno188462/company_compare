@@ -7,7 +7,7 @@
 | 标识 / 文档版本 | SDD-BE-SCREENING / v1.1 |
 | 行为契约 | CONTRACT-1.0，SDD 已确认；骨架尚待评审 |
 | PRD / UI 基线 | [PRD-1.0](../common/prd.md)、[UI-1.0](../common/ui_notes.md) |
-| 共享定义 | [global_schema.md](../common/global_schema.md)、[输入 Schema](../../input-schema.json)、[输出 Schema](../../output-schema.json) |
+| 共享定义 | [global_schema.md](../common/global_schema.md)、[输入 Schema](../../contracts/input-schema.json)、[输出 Schema](../../contracts/output-schema.json) |
 | 责任人 / 评审人 | 项目开发者（用户本人） |
 | 日期 / 状态 | 2026-10-22 / SDD 已通过，已生成骨架，尚未填充业务实现 |
 
@@ -39,7 +39,7 @@
 
 提供方原始地址及字段映射属于适配器设计，必须在真实接入前核验。当前有公开依据的能力包括 [工商基本信息](https://open.tianyancha.com/open/365)、[司法协助](https://open.tianyancha.com/open/756)、[企业年报](https://open.tianyancha.com/open/825)；它们不代表已开通权限，也不代表覆盖所有司法或资产线索。搜索新版地址本轮尚未由可访问官方当前文档确认，不能用旧文档地址冒充完成接入。
 
-分析方法参照根目录 [skill.md](../../skill.md)，运行时固定提示词为 [llm-system-prompt.txt](../../llm-system-prompt.txt)。Skill 是规则材料，不是具备网络能力的运行时服务。
+分析方法参照 [skill.md](../analysis/skill.md)，运行时固定提示词为 [llm-system-prompt.txt](../analysis/llm-system-prompt.txt)。Skill 是规则材料，不是具备网络能力的运行时服务。
 
 ## 4. 数据模型与 Schema
 
@@ -225,7 +225,7 @@
 
 ## 9. 验收与追踪
 
-测试规划见 [test-cases.md](../../test-cases.md)，均为待编写/待执行，不代表骨架或契约测试阶段已通过。
+测试规划见 [test-cases.md](../../tests/test-cases.md)，均为待编写/待执行，不代表骨架或契约测试阶段已通过。
 
 | 条款 | 验收条目 / 计划用例 | 验证归属 |
 | --- | --- | --- |

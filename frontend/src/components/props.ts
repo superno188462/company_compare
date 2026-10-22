@@ -1,5 +1,5 @@
 /** FE-DATA-02：组件输入与回调，仅声明契约，不提前实现页面。 */
-import type dictionary from "../../../text-dict.json";
+import type dictionary from "../../../contracts/text-dict.json";
 import type {
   EditableDraft, SearchResult, ShareReceipt, UUID,
 } from "../contracts/boundary.js";

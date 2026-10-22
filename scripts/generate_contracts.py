@@ -66,8 +66,8 @@ def expand_variants(definitions: dict[str, Any], name: str, names: list[str]) ->
 
 def build_bundle() -> dict[str, Any]:
     """构造仅供代码生成的本地投影，原 JSON Schema 始终为权威。"""
-    source = json.loads((ROOT / "input-schema.json").read_text(encoding="utf-8"))
-    output = json.loads((ROOT / "output-schema.json").read_text(encoding="utf-8"))
+    source = json.loads((ROOT / "contracts/input-schema.json").read_text(encoding="utf-8"))
+    output = json.loads((ROOT / "contracts/output-schema.json").read_text(encoding="utf-8"))
     definitions = copy.deepcopy(source["$defs"])
     definitions.update(copy.deepcopy(output["$defs"]))
     # URI 格式的模型类型会让生成器丢失 HTTP pattern/maxLength；声明投影使用

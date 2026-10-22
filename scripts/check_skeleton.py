@@ -89,8 +89,8 @@ def check_signatures(relative: str, expected: dict[str, list[str]]) -> None:
 
 def check_shared_models() -> None:
     """核对模型字段/必填性，并验证声明式模型的 JSON 往返。"""
-    inputs = json.loads((ROOT / "input-schema.json").read_text(encoding="utf-8"))
-    outputs = json.loads((ROOT / "output-schema.json").read_text(encoding="utf-8"))
+    inputs = json.loads((ROOT / "contracts/input-schema.json").read_text(encoding="utf-8"))
+    outputs = json.loads((ROOT / "contracts/output-schema.json").read_text(encoding="utf-8"))
     definitions = {**inputs["$defs"], **outputs["$defs"], "LlmInput": inputs, "WorkflowPayload": outputs}
     for name in ("Subject", "CategoryResults", "QueryCoverage", "SnapshotDraft", "WorkflowStatus", "SubmissionReceipt", "LlmInput", "WorkflowPayload"):
         model = getattr(generated, name)
@@ -138,7 +138,7 @@ def main() -> None:
     actual_routes = {(method, route.path) for route in routes for method in route.methods}
     assert actual_routes == EXPECTED_ROUTES
     check_shared_models()
-    dictionary = json.loads((ROOT / "text-dict.json").read_text(encoding="utf-8"))
+    dictionary = json.loads((ROOT / "contracts/text-dict.json").read_text(encoding="utf-8"))
     assert set(get_args(ValidationMessageKey)) == set(dictionary["validation"])
     assert {item.value for item in generated.HintCode} == set(dictionary["hints"])
     for module in ("company_screening.contracts.boundary", "company_screening.services", "company_screening.ports", "company_screening.errors", "backend.app", "backend.dependencies", "backend.routes"):

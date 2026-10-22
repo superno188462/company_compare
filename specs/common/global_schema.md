@@ -4,7 +4,7 @@
 
 契约版本：CONTRACT-1.0；日期：2026-10-22；状态：用户以“好先生成骨架吧”确认进入骨架阶段。关联 [PRD-1.0](prd.md)、[UI-1.0](ui_notes.md)。本文不代表骨架或测试已获批准。
 
-权威机器定义为根目录的 [input-schema.json](../../input-schema.json) 与 [output-schema.json](../../output-schema.json)，采用 JSON Schema 2020-12。输出引用输入中的共享定义；只允许离线注册本项目两个文件解析 `$ref`，禁止校验器自行访问网络。
+权威机器定义为 `contracts/` 下的 [input-schema.json](../../contracts/input-schema.json) 与 [output-schema.json](../../contracts/output-schema.json)，采用 JSON Schema 2020-12。输出引用输入中的共享定义；只允许离线注册本项目两个文件解析 `$ref`，禁止校验器自行访问网络。
 
 字段名、类型、必填与空值以机器定义为准；跨字段、授权、时间和状态行为以本文及前后端 SDD 为准。生成 Pydantic/TypeScript 类型时保留 description 与约束，不另维护冲突定义。
 
@@ -87,7 +87,7 @@
 
 ## DATA-06 文案与官方地址
 
-[text-dict.json](../../text-dict.json) 为固定文案权威来源。`ui_hint_group` 是提示 ID 数组，`hint_id` 为证据来源说明 ID；二者不承载企业事实。字典中的 severity 仅用于操作提示样式，不是企业评级。
+[text-dict.json](../../contracts/text-dict.json) 为固定文案权威来源。`ui_hint_group` 是提示 ID 数组，`hint_id` 为证据来源说明 ID；二者不承载企业事实。字典中的 severity 仅用于操作提示样式，不是企业评级。
 
 官方地址通过主管机关公开资料确认归属：
 

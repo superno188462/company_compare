@@ -215,7 +215,7 @@
 
 PRD/UI 评审通过后：编写前后端 SDD、共享 Schema 与数据状态契约，再依次进入骨架和契约测试评审，最后实现。
 
-用户要求的六项交付保留：分析方法论 `skill.md`、`input-schema.json`、`output-schema.json`、`llm-system-prompt.txt`、`text-dict.json`、`test-cases.md`。方法论文件只写分析思维；工程状态、缓存、接口和 UI 行为归项目规格。文件路径与权威定义归属由 SDD 确定，避免多份 Schema 冲突。
+用户要求的六项交付按用途归档：分析方法论与提示词位于 `specs/analysis/`（`skill.md`、`llm-system-prompt.txt`），输入输出与文案位于 `contracts/`（`input-schema.json`、`output-schema.json`、`text-dict.json`），验收场景位于 `tests/test-cases.md`。方法论文件只写分析思维；工程状态、缓存、接口和 UI 行为归项目规格。机器 Schema 只有一份权威定义。
 
 待在 SDD 锁定前完成的核验：天眼查具体接口、授权与分页/覆盖；LLM 接入与错误返回；官网地址；会话和共享回执权限；超时/重试上限、数据清理及报告校验可验证边界。可以先基于明确的依赖能力编写待评审规格，但在这些契约未明确前不能伪装完成真实集成。
 

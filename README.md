@@ -1,53 +1,57 @@
 # 企业公开线索筛查
 
-固定工作流：搜索企业 → 用户确认主体 → 取得公开线索 → 接纳人工补充 → 基于证据生成有限分析。官网只通过新标签页由用户浏览，应用不抓取网页，模型不自行检索或选择企业。
+这是一个固定流程的企业公开线索筛查工具，帮助用户核对材料、比较矛盾线索，并了解当前信息能支持什么结论。
 
-当前处于 **SDD 已确认、骨架待评审** 阶段。Python 业务函数均为 `raise NotImplementedError()`；前端只有类型、API 能力和组件 Props 声明。没有可运行的业务页面，也未连接真实天眼查或模型服务。
+## 只看这条主线
 
-## 项目目录
+输入公司名称 → 人工确认主体 → 查看公开证据 → 自动生成分析 → 手工补充后刷新分析。
+
+即使搜索只有一个候选，也由用户确认。人工补充只有匹配当前主体的材料才能进入分析。官网通过“在新标签页打开官网”按钮供用户核对。
+
+分析重点是：不同材料是否支持同一判断、是否来自同一原始来源、有无反证或其他解释、还缺什么信息。每条结论能追溯到证据；材料不足就说明不足。
+
+## 现在做到哪里
+
+**已完成规格与代码骨架，还没有可操作页面。** 前后端类型和接口声明已建立；Python 业务函数仍为 `raise NotImplementedError()`，真实天眼查和模型服务尚未接入。
+
+下一步围绕这条主线准备契约测试，再用模拟企业数据和模拟报告服务打通页面与后端。随后接入真实服务，补齐共享快照、会话期限和异常恢复等已约定能力。模拟数据页面需要明确标注演示数据。
+
+## 文件怎么找
+
+日常从本页开始；需要修改哪部分，再打开对应材料。
+
+| 要看什么 | 入口 |
+| --- | --- |
+| 企业交叉分析方法 | [分析规则](specs/analysis/skill.md)、[模型提示词](specs/analysis/llm-system-prompt.txt) |
+| 产品范围与页面流程 | [需求](specs/common/prd.md)、[页面说明](specs/common/ui_notes.md) |
+| 模型输入、页面输出和固定文案 | [输入](contracts/input-schema.json)、[输出](contracts/output-schema.json)、[文案](contracts/text-dict.json) |
+| 开发时核对接口与约束 | [后端规格](specs/backend/screening.spec.md)、[前端规格](specs/frontend/workspace.spec.md) |
+| 验收与当前骨架状态 | [验收场景](tests/test-cases.md)、[骨架检查记录](specs/common/skeleton-review.md) |
+
+代码目录：
 
 ```text
-specs/common/                 PRD、UI、共享语义与骨架评审映射
-specs/backend/                后端 SDD
-specs/frontend/               前端 SDD
-src/company_screening/       模型、服务签名、异常与外部端口
-backend/                     HTTP 路由与装配占位
-frontend/src/                共享类型、API Client 接口、状态与组件 Props
-scripts/                     离线类型生成与骨架检查工具
-input-schema.json            LLM 输入权威 Schema
-output-schema.json           工作流结果权威 Schema
-skill.md                     企业分析方法论
-llm-system-prompt.txt         固定分析提示词
-text-dict.json               固定提示与 UI 文案
-test-cases.md                验收场景规划，正式契约测试尚未编写
+src/company_screening/   企业筛查业务：模型、服务、外部依赖接口
+backend/                 HTTP 接口与应用装配
+frontend/src/            页面类型、状态与 API 调用接口
+contracts/               输入输出 Schema 与固定文案
+specs/                   分析方法、需求与开发规格
+tests/                   验收场景及后续测试
+scripts/                 类型生成与骨架检查工具
 ```
 
-## 准备环境
+## 开发检查
 
-Python 版本、环境与依赖由 `uv` 管理，开发解释器使用 `.python-version` 中的 Python 3.13；生成源码目标为 Python 3.12。前端工具使用 Node.js 与 npm。安装版本分别由 `uv.lock` 和 `frontend/package-lock.json` 锁定。
+使用 `uv` 管理 Python，开发解释器为 Python 3.13，源码目标为 Python 3.12；前端工具使用 Node.js 与 npm。安装依赖后运行检查：
 
 ```powershell
 uv sync --locked
 npm --prefix frontend ci
-```
-
-当前没有真实外部服务的启动指令。`backend.app.create_app()` 也是未实现占位，不能将类型检查通过视为系统可用。
-
-## 生成与检查骨架
-
-```powershell
-uv run python scripts/generate_contracts.py
 uv run mypy
 uv run python scripts/check_skeleton.py
 npm --prefix frontend run typecheck
 ```
 
-两个 JSON Schema 是权威定义。生成器只读取本地文件，展开已有来源/分类分支，生成 Python 和 TypeScript 声明，不修改原 Schema，不允许远程引用。不要直接修改 `generated.py` 或 `generated.ts`。
+`contracts/` 中两个 JSON Schema 是字段定义的权威来源；生成类型由 `uv run python scripts/generate_contracts.py` 更新，不手改 `generated.py` 或 `generated.ts`。共享行为语义见 [global_schema.md](specs/common/global_schema.md)。
 
-类型投影不实现所有跨字段行为：主体匹配、查询聚合、唯一性、权限、有效期、报告版本与条件空值等仍按原 Schema 和 SDD 约束，等待契约测试评审后实现。工具脚本中的生成/检查逻辑不属于应用业务实现。
-
-## 评审与后续阶段
-
-骨架和 SDD 的对应关系见 [骨架评审记录](specs/common/skeleton-review.md)。骨架评审通过后，再编写并评审绑定条款的正式契约测试，之后逐函数填充实现。
-
-真实提供方接口/权限、模型接入、浏览器官网入口、持久化与清理尚未验证；合成检查材料不能作为真实企业信息或真实连通性证明。
+上述命令检查骨架与类型，不能证明业务功能可用。正式契约测试尚未编写；当前骨架仍待评审。

@@ -2,7 +2,7 @@
 
 版本：v0.1；日期：2026-10-22；状态：SDD 已确认、骨架已生成；本文件仍是用例规划，尚未编写/运行正式契约测试，不代表测试基线已锁定。
 
-关联：[后端 SDD](specs/backend/screening.spec.md)、[前端 SDD](specs/frontend/workspace.spec.md)、[共享语义](specs/common/global_schema.md)。以下所有企业、金额与日期组合均为人工构造的教学输入，不指向真实企业；不得当作生产数据回填。
+关联：[后端 SDD](../specs/backend/screening.spec.md)、[前端 SDD](../specs/frontend/workspace.spec.md)、[共享语义](../specs/common/global_schema.md)。以下所有企业、金额与日期组合均为人工构造的教学输入，不指向真实企业；不得当作生产数据回填。
 
 ## 执行层次
 

@@ -1,5 +1,5 @@
 /** BE-DATA-02：HTTP 边界类型；模型字段与后端 SDD 对齐。 */
-import type dictionary from "../../../text-dict.json";
+import type dictionary from "../../../contracts/text-dict.json";
 import type { Category, HintCode, Subject, WorkflowPayload } from "./generated.js";
 
 /** 公开定位标识，不能单独用作授权凭据。 */
