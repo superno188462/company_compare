@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # 用户2026-10-23确认首批测试后，逐函数实现并验证的明确范围。
 IMPLEMENTED = {
+    ("src/company_screening/services.py", "SessionService._begin_query_retry"),
     ("src/company_screening/services.py", "SessionService.create"),
     ("src/company_screening/services.py", "SessionService.restore"),
     ("src/company_screening/services.py", "SessionService.activity"),
@@ -60,6 +61,7 @@ IMPLEMENTED = {
     ("src/company_screening/services.py", "ScreeningService.save_draft"),
     ("src/company_screening/services.py", "ScreeningService.clear_draft"),
     ("src/company_screening/services.py", "ScreeningService.submit"),
+    ("src/company_screening/services.py", "ScreeningService.retry_queries"),
     ("src/company_screening/services.py", "ScreeningService._run_submission_operation"),
     ("backend/dependencies.py", "get_screening_service"),
     ("backend/dependencies.py", "get_actor"),
@@ -70,6 +72,7 @@ IMPLEMENTED = {
     ("backend/routes.py", "save_draft"),
     ("backend/routes.py", "clear_draft"),
     ("backend/routes.py", "submit_evidence"),
+    ("backend/routes.py", "retry_queries"),
     ("backend/routes.py", "create_session"),
     ("backend/routes.py", "restore_session"),
     ("backend/routes.py", "notify_activity"),

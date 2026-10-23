@@ -7,9 +7,10 @@ import {
   ReportPanel, SearchPanel, SubjectHeader,
 } from "./components/WorkspacePanels.js";
 import type {
-  EditableDraft, ManualDraft, OperationHandle, OperationView, SearchResult, SubmitEvidenceCommand,
+  EditableDraft, ManualDraft, OperationHandle, OperationView, RetryQueryCommand, SearchResult, SubmitEvidenceCommand,
   UUID, WorkspaceState,
 } from "./contracts/boundary.js";
+import type { Category } from "./contracts/generated.js";
 import type { FieldErrors } from "./workspace/state.js";
 
 const SESSION_STORAGE_KEY = "company-screening-session-id";
@@ -82,6 +83,10 @@ export function App() {
   const draftRevisionRef = useRef(0);
   const pendingSubmissionRef = useRef<{
     command: SubmitEvidenceCommand; key: UUID; revision: number;
+  } | null>(null);
+  const queryRetryBusyRef = useRef(false);
+  const pendingQueryRetryRef = useRef<{
+    sid: UUID; command: RetryQueryCommand; key: UUID;
   } | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [queryText, setQueryText] = useState("");
@@ -294,6 +299,43 @@ export function App() {
     }
   };
 
+  const handleRetryQueries = async (categories: Category[]) => {
+    if (workspace === null || workspace.payload === null || actionBusy
+      || activeOperation !== null || queryRetryBusyRef.current) return;
+    const command: RetryQueryCommand = {
+      expected_generation: workspace.session_generation, categories,
+    };
+    let pending = pendingQueryRetryRef.current;
+    if (pending !== null && (pending.sid !== workspace.session_id
+      || pending.command.expected_generation !== workspace.session_generation)) {
+      pendingQueryRetryRef.current = null;
+      pending = null;
+    }
+    if (pending !== null && JSON.stringify(pending.command) !== JSON.stringify(command)) {
+      setNotice({ tone: "warning", text: dictionary.hints.OPERATION_CONFLICT.text });
+      return;
+    }
+    pending ??= { sid: workspace.session_id, command, key: newKey() };
+    pendingQueryRetryRef.current = pending;
+    queryRetryBusyRef.current = true;
+    setActionBusy(true);
+    setNotice({ tone: "info", text: dictionary.operation_phase_labels.query });
+    try {
+      // 响应丢失时沿用原幂等键，下一次点击不会重复启动查询。
+      const handle = await screeningApi.retryQueries(pending.sid, pending.command, pending.key);
+      pendingQueryRetryRef.current = null;
+      setWorkspace((current) => current === null ? current : { ...current, active_operation: handle });
+      setActiveOperation(handle);
+      setOperationPhase("query");
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status < 500) pendingQueryRetryRef.current = null;
+      setNotice(errorNotice(error));
+    } finally {
+      queryRetryBusyRef.current = false;
+      setActionBusy(false);
+    }
+  };
+
   const handleSaveDraft = async () => {
     if (workspace === null || localDraft === null) return;
     const submittedRevision = draftRevisionRef.current;
@@ -386,7 +428,11 @@ export function App() {
         )}
 
         {payload !== null && (
-          <CoveragePanel coverage={payload.api_status} busy={activeOperation !== null} onRetry={() => undefined} />
+          <CoveragePanel
+            coverage={payload.api_status}
+            busy={actionBusy || activeOperation !== null}
+            onRetry={(categories) => { void handleRetryQueries(categories); }}
+          />
         )}
 
         <div className="workspace-grid">

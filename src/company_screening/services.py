@@ -150,6 +150,49 @@ class SessionService:
             self._sessions[sid] = (actor.actor_id, updated)
             return handle
 
+    def _begin_query_retry(
+        self,
+        actor: ActorContext,
+        sid: UUID,
+        command: RetryQueryCommand,
+        operation_id: UUID,
+    ) -> tuple[OperationHandle, Subject]:
+        """原子接纳失败类别重试；保留原结果、草稿及本代次主体。"""
+        with self._lock:
+            state = self.restore(actor, sid)
+            code: ErrorCode | None = None
+            hint = HintCode.OPERATION_CONFLICT
+            fields: list[FieldIssue] = []
+            if state.current_subject is None:
+                code, hint = "SUBJECT_UNCONFIRMED", HintCode.CONFIRM_SUBJECT
+            elif (
+                state.session_generation != command.expected_generation
+                or state.payload is None or state.active_operation is not None
+            ):
+                code = "OPERATION_CONFLICT"
+            elif (
+                len(set(command.categories)) != len(command.categories)
+                or any(
+                    category not in state.payload.api_status.planned_categories.root
+                    or getattr(state.payload.api_status.categories, category.value).root.status != "error"
+                    for category in command.categories
+                )
+            ):
+                code, hint = "INPUT_INVALID", HintCode.LIMIT_EXCEEDED
+                fields = [FieldIssue(field="categories", message_key="input_invalid")]
+            if code:
+                info = ErrorInfo(code=code, hint_id=hint, fields=fields, retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+            assert state.current_subject is not None
+            handle = OperationHandle(
+                operation_id=operation_id, session_id=sid,
+                session_generation=state.session_generation,
+            )
+            self._sessions[sid] = (actor.actor_id, state.model_copy(update={"active_operation": handle}))
+            return handle, state.current_subject
+
     def _complete_operation(
         self,
         actor: ActorContext,
@@ -421,6 +464,9 @@ class ScreeningService:
     _submission_idempotency: ClassVar[
         dict[tuple[UUID, UUID, UUID], tuple[str, OperationHandle]]
     ] = {}
+    _retry_idempotency: ClassVar[
+        dict[tuple[UUID, UUID, UUID], tuple[str, OperationHandle]]
+    ] = {}
     _operations: ClassVar[dict[UUID, tuple[UUID, UUID, int, OperationView]]] = {}
     _lock: ClassVar[RLock] = RLock()
     _query_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(
@@ -596,8 +642,8 @@ class ScreeningService:
         return handle
 
     def _fail_operation(self, opid: UUID, info: ErrorInfo) -> None:
-        """把无法可靠形成完整结果的任务收敛为脱敏失败终态。"""
-        with self._lock:
+        """收敛脱敏失败并释放本任务，保留结果且不清除新代次的活动任务。"""
+        with self._lock, self._session_service._lock:
             stored = self._operations.get(opid)
             if stored is None:
                 return
@@ -608,22 +654,31 @@ class ScreeningService:
                 "error": info,
             }, deep=True)
             self._operations[opid] = (stored[0], stored[1], stored[2], failed)
+            entry = self._session_service._sessions.get(stored[1])
+            if entry is not None and entry[0] == stored[0]:
+                state = entry[1]
+                if (state.session_generation == stored[2] and state.active_operation is not None
+                        and state.active_operation.operation_id == opid):
+                    self._session_service._sessions[stored[1]] = (
+                        entry[0], state.model_copy(update={"active_operation": None}),
+                    )
 
     def _run_query_operation(
         self,
         actor: ActorContext,
         handle: OperationHandle,
         subject: Subject,
+        retry_categories: tuple[Category, ...] | None = None,
     ) -> None:
-        """在后台串行执行固定五类查询并写入完整终态。"""
+        """在后台串行执行已接纳的查询范围并守卫完整终态写回。"""
         with self._lock:
             stored = self._operations.get(handle.operation_id)
-            if stored is None:
+            if stored is None or stored[3].state in ("succeeded", "failed"):
                 return
             running = stored[3].model_copy(update={"state": "running", "phase": "query"}, deep=True)
             self._operations[handle.operation_id] = (stored[0], stored[1], stored[2], running)
         try:
-            payload = self._execute_query_operation(actor, handle, subject)
+            payload = self._execute_query_operation(actor, handle, subject, retry_categories)
             if not self._session_service._complete_operation(actor, handle, payload):
                 info = ErrorInfo(code="OPERATION_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT,
                                  fields=[], retryable=False)
@@ -655,8 +710,9 @@ class ScreeningService:
         actor: ActorContext,
         handle: OperationHandle,
         subject: Subject,
+        retry_categories: tuple[Category, ...] | None = None,
     ) -> WorkflowPayload:
-        """执行固定查询计划；类别失败只进入覆盖状态，不伪装成空结果。"""
+        """执行原计划或其失败子集；成功替换整类平台记录，失败保留旧材料。"""
         workspace = self._session_service.restore(actor, handle.session_id)
         if (
             workspace.session_generation != handle.session_generation
@@ -670,10 +726,18 @@ class ScreeningService:
             error.info = info
             raise error
 
-        category_results: dict[str, dict[str, object]] = {}
-        evidence_rows: list[dict[str, object]] = []
+        previous = workspace.payload if retry_categories is not None else None
+        category_results: dict[str, dict[str, object]] = (
+            previous.api_status.categories.model_dump(mode="python") if previous is not None else {}
+        )
+        evidence_rows: list[dict[str, object]] = (
+            previous.model_dump(mode="python")["evidence_list"] if previous is not None else []
+        )
+        planned = previous.api_status.planned_categories.root if previous is not None else list(Category)
         expected_credit = subject.credit_code.root
         for category in Category:
+            if category not in planned or (retry_categories is not None and category not in retry_categories):
+                continue
             attempted_at = self._clock()
             if self._company_data is None:
                 category_results[category.value] = {
@@ -707,7 +771,10 @@ class ScreeningService:
                     }
                     continue
                 record_ids = [record.record_id for record in batch.records]
-                if len(record_ids) != len(set(record_ids)) or len(evidence_rows) + len(batch.records) > 200:
+                retained_rows = [row for row in evidence_rows if not (
+                    row["source"] == "tianyan" and row["category"] == category.value
+                )]
+                if len(record_ids) != len(set(record_ids)) or len(retained_rows) + len(batch.records) > 200:
                     category_results[category.value] = {
                         "status": "error",
                         "record_count": 0,
@@ -739,7 +806,8 @@ class ScreeningService:
                         "verification_status": "original_not_verified",
                         "hint_id": "SOURCE_TIANYAN",
                     })
-                evidence_rows.extend(category_evidence)
+                # 完整类别通过校验后才替换，用户来源始终保留。
+                evidence_rows = [*retained_rows, *category_evidence]
                 category_results[category.value] = {
                     "status": "ok" if batch.records else "empty",
                     "record_count": len(batch.records),
@@ -764,7 +832,7 @@ class ScreeningService:
                     "error_code": "UPSTREAM_INVALID",
                 }
 
-        statuses = [str(category_results[category.value]["status"]) for category in Category]
+        statuses = [str(category_results[category.value]["status"]) for category in planned]
         if all(status == "error" for status in statuses):
             tianyan_status = "error"
         elif any(status == "error" for status in statuses):
@@ -774,13 +842,29 @@ class ScreeningService:
         else:
             tianyan_status = "empty"
 
-        hints = [HintCode.DISCLOSURE_LIMITED]
-        if evidence_rows:
-            hints.extend([HintCode.SOURCE_TIANYAN, HintCode.REPORT_FAILED])
+        changed = previous is None or (
+            evidence_rows != previous.model_dump(mode="python")["evidence_list"]
+            or category_results != previous.api_status.categories.model_dump(mode="python")
+        )
+        hints: list[HintCode] = ([item for item in previous.ui_hint_group if item not in (
+            HintCode.PARTIAL_COVERAGE, HintCode.QUERY_ERROR, HintCode.QUERY_EMPTY,
+            HintCode.NO_EVIDENCE, HintCode.SOURCE_TIANYAN,
+            HintCode.REPORT_FAILED, HintCode.REPORT_INVALID, HintCode.REPORT_STALE,
+        )] if previous is not None else [HintCode.DISCLOSURE_LIMITED])
+        llm_status = previous.api_status.llm_status.value if previous is not None else "skipped_no_evidence"
+        if any(row["source"] == "tianyan" for row in evidence_rows):
+            hints.append(HintCode.SOURCE_TIANYAN)
+        if evidence_rows and changed:
+            # 模型尚未装配；覆盖改变后明确报告失败，绝不编造当前版本报告。
             llm_status = "error"
-        else:
-            hints.append(HintCode.NO_EVIDENCE)
+        elif not evidence_rows:
             llm_status = "skipped_no_evidence"
+        if llm_status == "error":
+            hints.append(HintCode.REPORT_FAILED)
+        elif llm_status == "invalid_output":
+            hints.append(HintCode.REPORT_INVALID)
+        elif llm_status == "skipped_no_evidence":
+            hints.append(HintCode.NO_EVIDENCE)
         if tianyan_status == "partial":
             hints.append(HintCode.PARTIAL_COVERAGE)
         elif tianyan_status == "error":
@@ -788,27 +872,35 @@ class ScreeningService:
         elif tianyan_status == "empty":
             hints.append(HintCode.QUERY_EMPTY)
 
+        evidence_version = previous.api_status.evidence_version + int(changed) if previous is not None else 1
+        if (previous is not None and previous.api_status.summary_evidence_version is not None
+                and previous.api_status.summary_evidence_version < evidence_version):
+            hints.append(HintCode.REPORT_STALE)
         return WorkflowPayload.model_validate({
             "subject": subject,
             "evidence_list": evidence_rows,
-            "summary_text": "",
+            "summary_text": previous.summary_text if previous is not None and evidence_rows else "",
             "api_status": {
                 "tianyan_status": tianyan_status,
-                "planned_categories": [category.value for category in Category],
+                "planned_categories": planned,
                 "categories": category_results,
                 "session_id": handle.session_id,
                 "session_generation": handle.session_generation,
                 "operation_id": handle.operation_id,
-                "result_revision": 1,
-                "evidence_version": 1,
-                "summary_evidence_version": None,
-                "summary_generated_at": None,
+                "result_revision": previous.api_status.result_revision + 1 if previous is not None else 1,
+                "evidence_version": evidence_version,
+                "summary_evidence_version": (previous.api_status.summary_evidence_version
+                                             if previous is not None and evidence_rows else None),
+                "summary_generated_at": (previous.api_status.summary_generated_at
+                                         if previous is not None and evidence_rows else None),
                 "llm_status": llm_status,
-                "snapshot_status": "not_checked",
+                "snapshot_status": (previous.api_status.snapshot_status
+                                    if previous is not None and previous.api_status.snapshot_status != "available"
+                                    else "not_checked"),
                 "snapshot_draft": None,
-                "last_submission": None,
+                "last_submission": previous.api_status.last_submission if previous is not None else None,
             },
-            "ui_hint_group": hints,
+            "ui_hint_group": list(dict.fromkeys(hints)),
         })
 
     def save_draft(self, actor: ActorContext, sid: UUID, draft: EditableDraft, key: UUID) -> ManualDraft:
@@ -940,8 +1032,41 @@ class ScreeningService:
         raise NotImplementedError()
 
     def retry_queries(self, actor: ActorContext, sid: UUID, command: RetryQueryCommand, key: UUID) -> OperationHandle:
-        """BE-IF-03/05：仅重试原计划中的失败类别。"""
-        raise NotImplementedError()
+        """BE-IF-03/05：接纳原计划失败类别的显式重试，同键回放且不重复查询。"""
+        fingerprint = command.model_dump_json()
+        idempotency_key = (actor.actor_id, sid, key)
+        with self._lock, self._session_service._lock:
+            workspace = self._session_service.restore(actor, sid)
+            existing = self._retry_idempotency.get(idempotency_key)
+            if existing is not None:
+                if existing[0] != fingerprint:
+                    info = ErrorInfo(code="IDEMPOTENCY_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT,
+                                     fields=[], retryable=False)
+                    error = ApplicationError(info.code)
+                    error.info = info
+                    raise error
+                if existing[1].session_generation != workspace.session_generation:
+                    info = ErrorInfo(code="OPERATION_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT,
+                                     fields=[], retryable=False)
+                    error = ApplicationError(info.code)
+                    error.info = info
+                    raise error
+                return existing[1].model_copy(deep=True)
+            handle, subject = self._session_service._begin_query_retry(actor, sid, command, uuid4())
+            self._operations[handle.operation_id] = (
+                actor.actor_id, sid, handle.session_generation,
+                OperationView(**handle.model_dump(), state="queued", phase="query", result=None, error=None),
+            )
+            self._retry_idempotency[idempotency_key] = (fingerprint, handle.model_copy(deep=True))
+            self._session_service.activity(actor, sid)
+        categories = tuple(category for category in Category if category in command.categories)
+        try:
+            self._task_submitter(lambda: self._run_query_operation(actor, handle, subject, categories))
+        except Exception:
+            self._fail_operation(handle.operation_id, ErrorInfo(
+                code="INTERNAL_ERROR", hint_id=HintCode.INTERNAL_ERROR, fields=[], retryable=False,
+            ))
+        return handle
 
     def operation(self, actor: ActorContext, sid: UUID, opid: UUID) -> OperationView:
         """BE-IF-06：只读进度或完整终态，不续期。"""

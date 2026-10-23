@@ -105,7 +105,7 @@ export function SubjectHeader({ subject }: SubjectHeaderProps) {
   );
 }
 
-export function CoveragePanel({ coverage }: CoveragePanelProps) {
+export function CoveragePanel({ coverage, busy, onRetry }: CoveragePanelProps) {
   return (
     <section className="panel coverage-panel" aria-labelledby="coverage-title">
       <div className="section-heading">
@@ -129,6 +129,17 @@ export function CoveragePanel({ coverage }: CoveragePanelProps) {
                 </span>
                 {result.error_code !== null && <small>{result.error_code}</small>}
                 {result.record_count > 0 && <small>{result.record_count} 条</small>}
+                {result.status === "error" && coverage.planned_categories.includes(category) && (
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={busy}
+                    aria-label={`${dictionary.actions.retry_category}：${dictionary.category_labels[category]}`}
+                    onClick={() => onRetry([category])}
+                  >
+                    {dictionary.actions.retry_category}
+                  </button>
+                )}
               </div>
             </article>
           );

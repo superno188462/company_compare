@@ -116,9 +116,12 @@ def retry_analysis(sid: UUID, command: RetryAnalysisCommand, actor: TrustedActor
 
 
 @router.post("/sessions/{sid}/queries/retry", response_model=OperationHandle, status_code=202, summary="重试失败查询类别", description="仅原计划内失败类别可重试，不暗中扩大或缩小范围。")
-def retry_queries(sid: UUID, command: RetryQueryCommand, actor: TrustedActor, key: IdempotencyKey) -> OperationHandle:
-    """BE-IF-03/05：分类重试占位。"""
-    raise NotImplementedError()
+def retry_queries(
+    sid: UUID, command: RetryQueryCommand, actor: TrustedActor,
+    key: IdempotencyKey, service: SearchService,
+) -> OperationHandle:
+    """BE-IF-03/05：显式重试所选失败类别，返回既有查询任务句柄。"""
+    return service.retry_queries(actor, sid, command, key)
 
 
 @router.get("/sessions/{sid}/operations/{opid}", response_model=OperationView, summary="查看操作状态", description="只读进度或完整终态，不续期、不返回半段报告。")
