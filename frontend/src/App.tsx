@@ -7,8 +7,10 @@ import {
   ReportPanel, SearchPanel, SubjectHeader,
 } from "./components/WorkspacePanels.js";
 import type {
-  EditableDraft, ManualDraft, OperationHandle, SearchResult, UUID, WorkspaceState,
+  EditableDraft, ManualDraft, OperationHandle, OperationView, SearchResult, SubmitEvidenceCommand,
+  UUID, WorkspaceState,
 } from "./contracts/boundary.js";
+import type { FieldErrors } from "./workspace/state.js";
 
 const SESSION_STORAGE_KEY = "company-screening-session-id";
 let workspaceInitialization: Promise<WorkspaceState> | null = null;
@@ -78,6 +80,9 @@ async function initializeWorkspace(): Promise<WorkspaceState> {
 
 export function App() {
   const draftRevisionRef = useRef(0);
+  const pendingSubmissionRef = useRef<{
+    command: SubmitEvidenceCommand; key: UUID; revision: number;
+  } | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [queryText, setQueryText] = useState("");
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
@@ -86,6 +91,9 @@ export function App() {
   const [initializing, setInitializing] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [snapshotAcknowledged, setSnapshotAcknowledged] = useState(false);
+  const [operationPhase, setOperationPhase] = useState<OperationView["phase"]>("query");
 
   useEffect(() => {
     let cancelled = false;
@@ -116,12 +124,13 @@ export function App() {
         const view = await screeningApi.getOperation(workspace.session_id, activeOperation.operation_id);
         if (cancelled) return;
         if (view.state === "queued" || view.state === "running") {
+          setOperationPhase(view.phase);
           setNotice({ tone: "info", text: dictionary.operation_phase_labels[view.phase] });
           timer = window.setTimeout(() => { void poll(); }, 2000);
           return;
         }
-        setActiveOperation(null);
         if (view.state === "failed") {
+          setActiveOperation(null);
           setNotice(view.error === null
             ? { tone: "error", text: dictionary.hints.INTERNAL_ERROR.text }
             : { tone: "error", text: dictionary.hints[view.error.hint_id].text });
@@ -130,13 +139,17 @@ export function App() {
         const restored = await screeningApi.restoreSession(workspace.session_id);
         if (cancelled) return;
         setWorkspace(restored);
+        setActiveOperation(null);
         const result = view.result;
         if (result !== null) {
-          const firstHint = result.ui_hint_group[0];
+          const firstHint = result.ui_hint_group.find((hint) => dictionary.hints[hint].severity === "error")
+            ?? result.ui_hint_group.find((hint) => dictionary.hints[hint].severity === "warning")
+            ?? result.ui_hint_group[0];
           setNotice(firstHint === undefined
             ? { tone: "success", text: "企业资料查询已完成。" }
             : {
-              tone: dictionary.hints[firstHint].severity === "error" ? "error" : "warning",
+              tone: dictionary.hints[firstHint].severity === "error" ? "error"
+                : dictionary.hints[firstHint].severity === "warning" ? "warning" : "info",
               text: dictionary.hints[firstHint].text,
             });
         }
@@ -204,6 +217,10 @@ export function App() {
       setWorkspace(restored);
       setSearchResult(null);
       setActiveOperation(handle);
+      setOperationPhase("query");
+      pendingSubmissionRef.current = null;
+      setSnapshotAcknowledged(false);
+      setFieldErrors({});
       draftRevisionRef.current += 1;
       setLocalDraft(emptyDraft(candidate.credit_code));
       setNotice({ tone: "info", text: dictionary.operation_phase_labels.query });
@@ -216,7 +233,65 @@ export function App() {
 
   const handleDraftChange = (draft: EditableDraft) => {
     draftRevisionRef.current += 1;
+    setFieldErrors({});
     setLocalDraft(draft);
+  };
+
+  const handleSubmitEvidence = async () => {
+    if (workspace === null || workspace.current_subject === null || workspace.payload === null
+      || localDraft === null || actionBusy || activeOperation !== null) return;
+    let pending = pendingSubmissionRef.current;
+    if (pending === null) {
+      const errors: FieldErrors = {};
+      if (!localDraft.content.trim()) errors.content = "content_required";
+      if (!/^[0-9ABCDEFGHJKLMNPQRTUWXY]{18}$/.test(localDraft.record_credit_code?.trim() ?? "")) {
+        errors.record_credit_code = "credit_code_format";
+      }
+      if (Object.keys(errors).length > 0) {
+        setFieldErrors(errors);
+        setNotice({ tone: "warning", text: dictionary.validation.input_invalid });
+        return;
+      }
+    }
+    setActionBusy(true);
+    setFieldErrors({});
+    try {
+      if (pending === null) {
+        const revision = draftRevisionRef.current;
+        const saved = await screeningApi.saveDraft(workspace.session_id, localDraft, newKey());
+        setWorkspace((current) => current === null ? current : { ...current, draft: saved });
+        pending = {
+          command: {
+            draft_id: saved.draft_id,
+            expected_generation: workspace.session_generation,
+            expected_evidence_version: workspace.payload.api_status.evidence_version,
+            snapshot_acknowledged: snapshotAcknowledged,
+            share_consent: false,
+          },
+          key: newKey(), revision,
+        };
+        pendingSubmissionRef.current = pending;
+      }
+      // 网络结果不确定时重用原命令和幂等键，不能重复追加证据。
+      const handle = await screeningApi.submitEvidence(workspace.session_id, pending.command, pending.key);
+      pendingSubmissionRef.current = null;
+      setWorkspace((current) => current === null ? current : { ...current, draft: null, active_operation: handle });
+      setActiveOperation(handle);
+      setOperationPhase("analyze");
+      if (draftRevisionRef.current === pending.revision) {
+        setLocalDraft(emptyDraft(workspace.current_subject.credit_code));
+        setSnapshotAcknowledged(false);
+      }
+      setNotice({ tone: "info", text: dictionary.operation_phase_labels.analyze });
+    } catch (error) {
+      if (error instanceof ApiClientError) {
+        setFieldErrors(Object.fromEntries(error.info.fields.map((issue) => [issue.field, issue.message_key])));
+        if (error.status < 500) pendingSubmissionRef.current = null;
+      }
+      setNotice(errorNotice(error));
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const handleSaveDraft = async () => {
@@ -242,6 +317,8 @@ export function App() {
       await screeningApi.clearDraft(workspace.session_id, newKey());
       draftRevisionRef.current += 1;
       setLocalDraft(emptyDraft(workspace.current_subject.credit_code));
+      setSnapshotAcknowledged(false);
+      setFieldErrors({});
       setWorkspace((current) => current === null ? current : { ...current, draft: null });
       setNotice({ tone: "info", text: "草稿已清空。" });
     } catch (error) {
@@ -304,7 +381,7 @@ export function App() {
         {activeOperation !== null && (
           <section className="operation-banner" aria-live="polite">
             <span className="spinner" aria-hidden="true" />
-            <div><strong>{dictionary.labels.processing}</strong><p>{dictionary.operation_phase_labels.query}</p></div>
+            <div><strong>{dictionary.labels.processing}</strong><p>{dictionary.operation_phase_labels[operationPhase]}</p></div>
           </section>
         )}
 
@@ -346,15 +423,15 @@ export function App() {
             <ManualEvidenceForm
               draft={localDraft}
               fromSnapshot={workspace?.draft?.from_snapshot_id !== null && workspace?.draft?.from_snapshot_id !== undefined}
-              snapshotAcknowledged={false}
+              snapshotAcknowledged={snapshotAcknowledged}
               shareConsent={false}
-              busy={actionBusy}
-              fieldErrors={{}}
+              busy={actionBusy || activeOperation !== null}
+              fieldErrors={fieldErrors}
               onChange={handleDraftChange}
               onSaveDraft={() => { void handleSaveDraft(); }}
-              onSubmit={() => undefined}
+              onSubmit={() => { void handleSubmitEvidence(); }}
               onClear={() => { void handleClearDraft(); }}
-              onAcknowledge={() => undefined}
+              onAcknowledge={setSnapshotAcknowledged}
               onShareChange={() => undefined}
             />
             {workspace?.draft !== null && workspace?.draft !== undefined && workspace.draft.issues.length > 0 && (

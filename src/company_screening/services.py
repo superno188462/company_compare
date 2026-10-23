@@ -7,15 +7,18 @@ import hashlib
 import re
 from threading import RLock
 from typing import ClassVar
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
+
+from pydantic import AnyHttpUrl, ValidationError
 
 from .contracts.boundary import (
     ActorContext, Candidate, ConfirmSubjectCommand, EditableDraft, FieldIssue, ManualDraft, OperationHandle,
-    ErrorInfo, OperationView, RetryAnalysisCommand, RetryQueryCommand, SearchCommand, SearchResult,
+    ErrorCode, ErrorInfo, OperationView, RetryAnalysisCommand, RetryQueryCommand, SearchCommand, SearchResult,
     SessionExpiry, SubmitEvidenceCommand, WithdrawalResult, WorkspaceState,
 )
 from .errors import ApplicationError, ProviderError
-from .contracts.generated import Category, HintCode, NullableText, Subject, WorkflowPayload
+from .contracts.generated import Category, HintCode, LlmStatus, NullableText, Subject, WorkflowPayload
 from .ports import CompanyDataPort
 
 
@@ -242,6 +245,168 @@ class SessionService:
             state = entry[1]
             self._sessions[sid] = (actor.actor_id, state.model_copy(update={"draft": None}))
 
+    def _accept_submission(
+        self,
+        actor: ActorContext,
+        sid: UUID,
+        command: SubmitEvidenceCommand,
+        operation_id: UUID,
+        now: datetime,
+    ) -> tuple[OperationHandle, WorkflowPayload]:
+        """在会话锁内校验并接纳私人线索；失败保持草稿、证据和任务不变。
+
+        共享发布和快照存储尚未装配，合法共享请求仅记录共享存储失败，
+        不把未写入的共享声称为成功；关联快照必须经其存储复核后才可接纳。
+        """
+        with self._lock:
+            state = self.restore(actor, sid)
+            code: ErrorCode | None = None
+            hint = HintCode.LIMIT_EXCEEDED
+            fields: list[FieldIssue] = []
+            subject = state.current_subject
+            payload = state.payload
+            draft = state.draft
+            if subject is None:
+                code, hint = "SUBJECT_UNCONFIRMED", HintCode.CONFIRM_SUBJECT
+            elif (
+                state.session_generation != command.expected_generation
+                or payload is None
+                or payload.api_status.evidence_version != command.expected_evidence_version
+                or state.active_operation is not None
+                or draft is None
+                or draft.draft_id != command.draft_id
+            ):
+                code, hint = "OPERATION_CONFLICT", HintCode.OPERATION_CONFLICT
+            if code:
+                info = ErrorInfo(code=code, hint_id=hint, fields=[], retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+            # 上述分支已排除缺失状态；显式断言同时保证类型收窄。
+            assert subject is not None and payload is not None and draft is not None
+            record_code = (draft.record_credit_code or "").strip()
+            if not record_code:
+                code, hint = "CREDIT_MISSING", HintCode.CREDIT_MISSING
+            elif re.fullmatch(r"[0-9ABCDEFGHJKLMNPQRTUWXY]{18}", record_code) is None:
+                code = "INPUT_INVALID"
+                fields = [FieldIssue(field="record_credit_code", message_key="credit_code_format")]
+            elif record_code != subject.credit_code.root:
+                code, hint = "CREDIT_MISMATCH", HintCode.CREDIT_MISMATCH
+            else:
+                content_codes = set(re.findall(
+                    r"(?<![0-9A-Z])[0-9ABCDEFGHJKLMNPQRTUWXY]{18}(?![0-9A-Z])",
+                    draft.content.upper(),
+                ))
+                if any(item != record_code for item in content_codes):
+                    code, hint = "CREDIT_CONFLICT", HintCode.CREDIT_CONFLICT
+            if not code and not draft.content.strip():
+                code = "INPUT_INVALID"
+                fields = [FieldIssue(field="content", message_key="content_required")]
+
+            source_url = draft.source_url
+            if not code and source_url is not None:
+                try:
+                    AnyHttpUrl(source_url)  # 仅做本地地址格式校验，不探测网页。
+                    parsed = urlsplit(source_url)
+                    valid_url = (
+                        parsed.scheme in ("http", "https")
+                        and bool(parsed.hostname)
+                        and parsed.username is None and parsed.password is None
+                        and not any(ord(char) < 32 or ord(char) == 127 or char.isspace()
+                                    for char in source_url)
+                        and "\\" not in source_url
+                    )
+                    parsed.port  # 端口格式也需合法；不访问该地址。
+                except (ValueError, ValidationError):
+                    valid_url = False
+                if not valid_url:
+                    code = "INPUT_INVALID"
+                    fields = [FieldIssue(field="source_url", message_key="url_format")]
+
+            observed_at: datetime | None = None
+            if not code and draft.observed_at is not None:
+                try:
+                    if re.fullmatch(
+                        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+                        draft.observed_at,
+                    ) is None:
+                        raise ValueError("invalid RFC3339")
+                    observed_at = datetime.fromisoformat(draft.observed_at.replace("Z", "+00:00"))
+                    if observed_at.utcoffset() is None:
+                        raise ValueError("missing timezone")
+                except ValueError:
+                    code = "INPUT_INVALID"
+                    fields = [FieldIssue(field="observed_at", message_key="time_format")]
+                else:
+                    if observed_at > now:
+                        code = "INPUT_INVALID"
+                        fields = [FieldIssue(field="observed_at", message_key="future_time")]
+            if not code and draft.from_snapshot_id is not None:
+                if not command.snapshot_acknowledged:
+                    code, hint = "SNAPSHOT_CONFIRM_REQUIRED", HintCode.SNAPSHOT_CONFIRM_REQUIRED
+                else:
+                    # 当前未装配共享存储，不能把未经重新读取的快照当作有效材料。
+                    code, hint = "SNAPSHOT_UNAVAILABLE", HintCode.SNAPSHOT_EXPIRED
+            if not code and command.share_consent and (
+                source_url is None or observed_at is None
+                or now >= observed_at + timedelta(days=7)
+            ):
+                code, hint = "SHARE_REQUIREMENTS", HintCode.SOURCE_INFO_MISSING
+                fields = [FieldIssue(field="share_consent", message_key="share_fields_required")]
+            if not code and len(payload.evidence_list) >= 200:
+                code = "INPUT_TOO_LARGE"
+                fields = [FieldIssue(field="content", message_key="evidence_limit")]
+            if code:
+                info = ErrorInfo(code=code, hint_id=hint, fields=fields, retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+
+            handle = OperationHandle(
+                operation_id=operation_id, session_id=sid,
+                session_generation=state.session_generation,
+            )
+            evidence_id = f"E-US-{uuid4().hex.upper()}"
+            # 只有全部校验成功后才构造新payload；未知的查看时间不能补成现在。
+            accepted = payload.model_dump(mode="python")
+            accepted["evidence_list"].append({
+                "evidence_id": evidence_id, "subject_credit_code": subject.credit_code.root,
+                "category": draft.category, "content": draft.content, "source": "user_self",
+                "snapshot_time": observed_at, "captured_at": now, "event_time": draft.event_time,
+                "source_url": source_url, "source_publisher": None, "provider_record_id": None,
+                "origin_id": f"user:{uuid4()}", "derived_from": None,
+                "verification_status": "original_not_verified", "hint_id": "SOURCE_USER_SELF",
+            })
+            status = accepted["api_status"]
+            status.update({
+                "operation_id": operation_id,
+                "evidence_version": payload.api_status.evidence_version + 1,
+                "result_revision": payload.api_status.result_revision + 1,
+                "llm_status": "running",
+                "last_submission": {
+                    "operation_id": operation_id, "evidence_id": evidence_id,
+                    "share_status": "error" if command.share_consent else "not_requested",
+                    "share_receipt_id": None,
+                },
+            })
+            hints: list[HintCode] = [item for item in payload.ui_hint_group if item not in (
+                HintCode.NO_EVIDENCE, HintCode.REPORT_FAILED, HintCode.REPORT_INVALID,
+                HintCode.EVIDENCE_SAVED, HintCode.SHARE_FAILED, HintCode.SHARE_SAVED,
+            )]
+            hints.extend([HintCode.SOURCE_USER_SELF, HintCode.EVIDENCE_SAVED])
+            if source_url is None or observed_at is None:
+                hints.append(HintCode.SOURCE_INFO_MISSING)
+            if command.share_consent:
+                hints.append(HintCode.SHARE_FAILED)
+            if payload.api_status.summary_evidence_version is not None:
+                hints.append(HintCode.REPORT_STALE)
+            accepted["ui_hint_group"] = list(dict.fromkeys(hints))
+            accepted_payload = WorkflowPayload.model_validate(accepted)
+            self._sessions[sid] = (actor.actor_id, state.model_copy(update={
+                "payload": accepted_payload, "draft": None, "active_operation": handle,
+            }, deep=True))
+            return handle, accepted_payload.model_copy(deep=True)
+
 
 class ScreeningService:
     """搜索、证据提交和受控报告工作流边界。"""
@@ -253,6 +418,9 @@ class ScreeningService:
         dict[tuple[UUID, UUID, UUID], tuple[str, int, ManualDraft]]
     ] = {}
     _clear_draft_idempotency: ClassVar[set[tuple[UUID, UUID, UUID]]] = set()
+    _submission_idempotency: ClassVar[
+        dict[tuple[UUID, UUID, UUID], tuple[str, OperationHandle]]
+    ] = {}
     _operations: ClassVar[dict[UUID, tuple[UUID, UUID, int, OperationView]]] = {}
     _lock: ClassVar[RLock] = RLock()
     _query_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(
@@ -685,8 +853,87 @@ class ScreeningService:
             self._clear_draft_idempotency.add(idempotency_key)
 
     def submit(self, actor: ActorContext, sid: UUID, command: SubmitEvidenceCommand, key: UUID) -> OperationHandle:
-        """BE-IF-04：校验后接纳、按同意范围共享并自动分析。"""
-        raise NotImplementedError()
+        """BE-IF-04：校验服务端草稿后原子接纳，返回自动分析任务句柄。
+
+        同键同请求回放原句柄；同键不同内容拒绝。校验不通过保留草稿，
+        已经接纳后模型不可用不回滚证据。共享存储尚未配置，不发布共享。
+        """
+        self._session_service.restore(actor, sid)
+        fingerprint = command.model_dump_json()
+        idempotency_key = (actor.actor_id, sid, key)
+        # 锁的固定次序与确认/草稿流程一致；接纳、任务和幂等记录一起提交。
+        with self._lock, self._session_service._lock:
+            existing = self._submission_idempotency.get(idempotency_key)
+            if existing is not None:
+                if existing[0] != fingerprint:
+                    info = ErrorInfo(
+                        code="IDEMPOTENCY_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT,
+                        fields=[], retryable=False,
+                    )
+                    error = ApplicationError(info.code)
+                    error.info = info
+                    raise error
+                return existing[1].model_copy(deep=True)
+            handle, accepted = self._session_service._accept_submission(
+                actor, sid, command, uuid4(), self._clock(),
+            )
+            self._operations[handle.operation_id] = (
+                actor.actor_id, sid, handle.session_generation,
+                OperationView(
+                    **handle.model_dump(), state="queued", phase="analyze", result=None, error=None,
+                ),
+            )
+            self._submission_idempotency[idempotency_key] = (
+                fingerprint, handle.model_copy(deep=True),
+            )
+            self._session_service.activity(actor, sid)
+        try:
+            self._task_submitter(lambda: self._run_submission_operation(actor, handle, accepted))
+        except Exception:
+            # 当前收敛只处理“模型未配置”，无网络调用；排队失败也给出可靠完整终态。
+            self._run_submission_operation(actor, handle, accepted)
+        return handle
+
+    def _run_submission_operation(
+        self,
+        actor: ActorContext,
+        handle: OperationHandle,
+        accepted_payload: WorkflowPayload,
+    ) -> None:
+        """收敛接纳任务；当前未配置模型时如实失败，已保存证据不回滚。"""
+        with self._lock:
+            stored = self._operations.get(handle.operation_id)
+            if stored is None or stored[3].state in ("succeeded", "failed"):
+                return
+            running = stored[3].model_copy(update={"state": "running", "phase": "analyze"})
+            self._operations[handle.operation_id] = (stored[0], stored[1], stored[2], running)
+        try:
+            result = accepted_payload.model_copy(deep=True)
+            result.api_status.llm_status = LlmStatus.error
+            result.api_status.result_revision += 1
+            result.ui_hint_group = list(dict.fromkeys([
+                *result.ui_hint_group, HintCode.REPORT_FAILED,
+            ]))
+            if not self._session_service._complete_operation(actor, handle, result):
+                self._fail_operation(handle.operation_id, ErrorInfo(
+                    code="OPERATION_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT,
+                    fields=[], retryable=False,
+                ))
+                return
+        except Exception:
+            self._fail_operation(handle.operation_id, ErrorInfo(
+                code="INTERNAL_ERROR", hint_id=HintCode.INTERNAL_ERROR,
+                fields=[], retryable=False,
+            ))
+            return
+        with self._lock:
+            stored = self._operations.get(handle.operation_id)
+            if stored is not None:
+                self._operations[handle.operation_id] = (
+                    stored[0], stored[1], stored[2], stored[3].model_copy(update={
+                        "state": "succeeded", "phase": "complete", "result": result, "error": None,
+                    }, deep=True),
+                )
 
     def retry_analysis(self, actor: ActorContext, sid: UUID, command: RetryAnalysisCommand, key: UUID) -> OperationHandle:
         """BE-IF-05：仅重新分析当前版本，不重复录入。"""

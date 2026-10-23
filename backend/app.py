@@ -42,7 +42,7 @@ def create_app(
         )
     app = FastAPI(
         title="企业公开线索筛查 API", version="0.1.0",
-        description="开发中的接口契约。会话、候选搜索、人工确认、五类详情查询、任务轮询及私有草稿保存/清空已接通；证据接纳、共享和模型分析仍在开发。",
+        description="开发中的接口契约。会话、候选搜索、人工确认、五类详情查询、任务轮询、私人草稿及线索接纳已接通；共享发布和真实模型分析仍在开发。",
     )
     app.state.screening_service = screening_service
     app.state.session_service = session_service

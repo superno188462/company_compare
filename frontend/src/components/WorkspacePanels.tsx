@@ -180,7 +180,8 @@ export function ReportPanel({ summaryText, status }: ReportPanelProps) {
 }
 
 export function ManualEvidenceForm({
-  draft, fromSnapshot, busy, fieldErrors, onChange, onSaveDraft, onClear,
+  draft, fromSnapshot, snapshotAcknowledged, busy, fieldErrors, onChange, onSaveDraft,
+  onSubmit, onClear, onAcknowledge,
 }: ManualEvidenceFormProps) {
   return (
     <section className="panel manual-panel" aria-labelledby="manual-title">
@@ -188,7 +189,7 @@ export function ManualEvidenceForm({
         <h2 id="manual-title">{dictionary.labels.manual_entry}</h2>
         <span className="muted">{fromSnapshot ? dictionary.labels.snapshot_prefill : dictionary.labels.draft_only}</span>
       </div>
-      <div className="form-grid">
+      <div className={`form-grid ${fromSnapshot ? "snapshot-prefill" : ""}`}>
         <label>
           <span>{dictionary.labels.record_credit_code}</span>
           <input
@@ -218,6 +219,7 @@ export function ManualEvidenceForm({
             onChange={(event) => onChange({ ...draft, content: event.target.value })}
           />
           <small>{draft.content.length} / 4000</small>
+          {fieldErrors.content && <small role="alert">{dictionary.validation[fieldErrors.content]}</small>}
         </label>
         <label>
           <span>{dictionary.labels.source_url}</span>
@@ -227,14 +229,18 @@ export function ManualEvidenceForm({
             placeholder="https://"
             onChange={(event) => onChange({ ...draft, source_url: event.target.value || null })}
           />
+          {fieldErrors.source_url && <small role="alert">{dictionary.validation[fieldErrors.source_url]}</small>}
         </label>
         <label>
           <span>{dictionary.labels.observed_at}</span>
           <input
-            type="datetime-local"
+            type="text"
             value={draft.observed_at ?? ""}
+            placeholder="例如 2026-10-23T10:00:00+08:00；未知可留空"
+            maxLength={64}
             onChange={(event) => onChange({ ...draft, observed_at: event.target.value || null })}
           />
+          {fieldErrors.observed_at && <small role="alert">{dictionary.validation[fieldErrors.observed_at]}</small>}
         </label>
         <label className="full-field">
           <span>{dictionary.labels.event_time_optional}</span>
@@ -245,7 +251,19 @@ export function ManualEvidenceForm({
           />
         </label>
       </div>
+      {fromSnapshot && (
+        <label className="acknowledgement">
+          <input type="checkbox" checked={snapshotAcknowledged} disabled={busy}
+            onChange={(event) => onAcknowledge(event.target.checked)} />
+          <span>{dictionary.labels.snapshot_acknowledgement}</span>
+        </label>
+      )}
       <div className="form-actions">
+        <button className="primary-button" type="button"
+          disabled={busy || !draft.content.trim() || (fromSnapshot && !snapshotAcknowledged)}
+          onClick={onSubmit}>
+          {dictionary.actions.submit_evidence}
+        </button>
         <button className="secondary-button" type="button" disabled={busy} onClick={onSaveDraft}>
           {dictionary.actions.save_draft}
         </button>
@@ -253,7 +271,7 @@ export function ManualEvidenceForm({
           清空草稿
         </button>
       </div>
-      <p className="field-note">保存草稿不会进入分析。证据接纳与自动分析将在后续接口接通后开放。</p>
+      <p className="field-note">保存草稿后仍可修改；提交后才进入本次会话的证据包。当前不开放共享。</p>
     </section>
   );
 }

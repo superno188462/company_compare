@@ -101,9 +101,12 @@ def clear_draft(
 
 
 @router.post("/sessions/{sid}/evidence", response_model=OperationHandle, status_code=202, summary="提交线索并自动分析", description="校验服务端草稿、主体、知情确认与共享同意。")
-def submit_evidence(sid: UUID, command: SubmitEvidenceCommand, actor: TrustedActor, key: IdempotencyKey) -> OperationHandle:
-    """BE-IF-04：接纳与自动分析占位。"""
-    raise NotImplementedError()
+def submit_evidence(
+    sid: UUID, command: SubmitEvidenceCommand, actor: TrustedActor,
+    key: IdempotencyKey, service: SearchService,
+) -> OperationHandle:
+    """BE-IF-04：接纳匹配主体的服务端草稿，并返回自动分析任务句柄。"""
+    return service.submit(actor, sid, command, key)
 
 
 @router.post("/sessions/{sid}/analysis/retry", response_model=OperationHandle, status_code=202, summary="重新分析当前版本", description="不重复接纳或共享线索，空证据不调用LLM。")
