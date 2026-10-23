@@ -4,12 +4,12 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 标识 / 文档版本 | SDD-BE-SCREENING / v1.8 |
+| 标识 / 文档版本 | SDD-BE-SCREENING / v1.9 |
 | 行为契约 | CONTRACT-1.0，SDD与首批测试已确认；逐函数实现中 |
 | PRD / UI 基线 | [PRD-1.0](../common/prd.md)、[UI-1.0](../common/ui_notes.md) |
 | 共享定义 | [global_schema.md](../common/global_schema.md)、[输入 Schema](../../contracts/input-schema.json)、[输出 Schema](../../contracts/output-schema.json) |
 | 责任人 / 评审人 | 项目开发者（用户本人） |
-| 日期 / 状态 | 2026-10-23 / 已接通会话、搜索、人工确认、五类查询编排及任务轮询；真实详情适配与模型待实现 |
+| 日期 / 状态 | 2026-10-23 / 已接通会话、搜索、人工确认、五类查询编排、详情适配及任务轮询；模型待实现 |
 
 | 日期 | 版本 | 变更 | 评审记录 |
 | --- | --- | --- | --- |
@@ -23,6 +23,7 @@
 | 2026-10-23 | v1.6 | 实现签名匿名Cookie、会话HTTP边界与ScreeningService.search，将天眼查适配器接入搜索路由；CONTRACT-1.0不变 | 用户回复“继续”；新增会话/搜索契约用例并完成对应垂直切片，执行记录见tests/test-cases.md |
 | 2026-10-23 | v1.7 | 实现人工确认候选、主体代次切换、查询任务句柄及confirm HTTP路由；CONTRACT-1.0不变 | 用户再次回复“继续”；新增确认主体契约用例，执行记录见tests/test-cases.md |
 | 2026-10-23 | v1.8 | 实现固定五类串行查询编排、分类覆盖聚合、证据规范化、迟到写回保护及任务轮询；CONTRACT-1.0不变 | 用户再次回复“继续”；新增任务状态与查询终态契约用例，执行记录见tests/test-cases.md |
+| 2026-10-23 | v1.9 | 实现天眼查五类详情适配、固定子工具计划、完整分页和记录规范化；CONTRACT-1.0不变 | 用户再次回复“继续”；先核验官方目录与当前Key权限，再新增适配器契约用例，执行记录见tests/test-cases.md |
 
 ## 2. 目标与范围
 
@@ -44,7 +45,7 @@
 | 会话/共享存储 | 主体隔离、原子接纳、版本、幂等和期限能力 | 会话保存失败不启动分析；共享故障可保留已存会话材料 |
 | 时钟/标识/匿名所有者验证 | 服务端时间、不可预测公开 ID、验证过的所有者上下文 | 测试替换时钟与身份，不信任客户端时间/所有者 ID |
 
-提供方原始地址及字段映射属于适配器设计，必须在真实接入前核验。天眼查官方 [tyc-cli](https://github.com/tyc-tech/tyc-cli) 当前说明 MCP 入口为 `https://mcp.tianyancha.com/mcp`，应用使用其无会话 Shared Core `POST /v1/core/tools/call`，搜索工具为 `search_companies`；认证值只放在服务端 `Authorization` 请求头。该搜索返回主体锚定字段，但不返回注册省市，适配器必须将未知地区保留为 null，不能猜测。官方 [catalog.json](https://github.com/tyc-tech/tyc-cli/blob/main/src/catalog.json) 已核验存在工商登记、股东、经营异常、行政处罚、失信、被执行、限高、司法案件、裁判文书、法院公告、股权冻结、司法协助、动产抵押和土地抵押等工具；各工具的真实响应字段与当前Key权限仍须逐项验证后才能实现 `fetch_category`。已有公开依据的分类能力还包括 [工商基本信息](https://open.tianyancha.com/open/365)、[司法协助](https://open.tianyancha.com/open/756)、[企业年报](https://open.tianyancha.com/open/825)；它们属于另一套 OpenAPI 文档，仅用于后续能力映射参考，不代表当前 MCP Key 已开通全部工具，也不代表覆盖所有司法或资产线索。
+提供方原始地址及字段映射属于适配器设计，必须在真实接入前核验。天眼查官方 [tyc-cli](https://github.com/tyc-tech/tyc-cli) 当前说明 MCP 入口为 `https://mcp.tianyancha.com/mcp`，应用使用其无会话 Shared Core `POST /v1/core/tools/call`，搜索工具为 `search_companies`；认证值只放在服务端 `Authorization` 请求头。该搜索返回主体锚定字段，但不返回注册省市，适配器必须将未知地区保留为 null，不能猜测。官方 [catalog.json](https://github.com/tyc-tech/tyc-cli/blob/main/src/catalog.json) 已核验本项目固定子工具计划：basic 使用工商登记、股东；abnormal 使用经营异常；penalty 使用行政处罚；judicial 使用失信、被执行、限高、司法案件、裁判文书、法院公告；asset 使用股权冻结、司法协助、动产抵押、土地抵押。每个明细工具完整分页后才能发布对应类别，任一子工具失败则整类失败。当前Key实测可调用工商登记 L1 工具，其余已探测的 L2 明细工具返回 `insufficient_entitlement`；应用将其映射为 `UPSTREAM_AUTH`，不会把无权限写成无记录。工商登记真实 `sources` 结构已核验，L2成功正文结构目前只由假传输契约覆盖，升级权限后仍需补真实集成验证。已有公开依据的分类能力还包括 [工商基本信息](https://open.tianyancha.com/open/365)、[司法协助](https://open.tianyancha.com/open/756)、[企业年报](https://open.tianyancha.com/open/825)；它们属于另一套 OpenAPI 文档，仅用于能力映射参考，不代表当前 MCP Key 已开通全部工具，也不代表覆盖所有司法或资产线索。
 
 分析方法参照 [skill.md](../analysis/skill.md)，运行时固定提示词为 [llm-system-prompt.txt](../analysis/llm-system-prompt.txt)。Skill 是规则材料，不是具备网络能力的运行时服务。
 

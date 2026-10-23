@@ -1,7 +1,8 @@
 """天眼查 MCP Shared Core 适配器。"""
 
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime, timezone
+import hashlib
 import json
 import time
 from typing import Any
@@ -13,11 +14,62 @@ from ..contracts.boundary import (
     ProviderCandidate,
     ProviderCategoryBatch,
     ProviderFailureCode,
+    ProviderRecord,
     ProviderSearchPage,
     SearchCommand,
 )
-from ..contracts.generated import Category, Subject
+from ..contracts.generated import Category, CreditCode, Subject
 from ..errors import ProviderError
+
+
+_CATEGORY_TOOL_PLAN: dict[Category, tuple[tuple[str, bool], ...]] = {
+    Category.basic: (
+        ("get_company_registration_info", False),
+        ("get_shareholder_info", True),
+    ),
+    Category.abnormal: (("get_business_exception", True),),
+    Category.penalty: (("get_administrative_penalty", True),),
+    Category.judicial: (
+        ("get_dishonest_info", True),
+        ("get_judgment_debtor_info", True),
+        ("get_high_consumption_restriction", True),
+        ("get_judicial_case", True),
+        ("get_judicial_documents", True),
+        ("get_court_notice", True),
+    ),
+    Category.asset: (
+        ("get_equity_freeze", True),
+        ("get_judicial_assistance", True),
+        ("get_chattel_mortgage_info", True),
+        ("get_land_mortgage_info", True),
+    ),
+}
+
+_CATEGORY_SCOPE: dict[Category, str] = {
+    Category.basic: "工商登记、股东及出资",
+    Category.abnormal: "经营异常",
+    Category.penalty: "行政处罚",
+    Category.judicial: "失信、被执行、限高、司法案件、裁判文书及法院公告",
+    Category.asset: "股权冻结、司法协助、动产抵押及土地抵押",
+}
+
+_SENSITIVE_KEY_PARTS = (
+    "score", "rating", "risklevel", "phone", "mobile", "telephone", "email", "contact",
+    "wechat", "qq",
+)
+_CREDIT_KEYS = ("creditCode", "companyCreditCode", "socialCreditCode")
+_ID_KEYS = (
+    "id", "recordId", "caseId", "uuid", "punishNumber", "decisionNumber", "caseNo",
+    "regNumber", "documentNumber",
+)
+_TIME_KEYS = (
+    "eventTime", "decisionDate", "publishDate", "registerDate", "updateTimes",
+    "establishTime", "estiblishTime", "fromTime", "date", "time",
+)
+_URL_KEYS = ("sourceUrl", "detailUrl", "url")
+_PUBLISHER_KEYS = (
+    "sourcePublisher", "publishDepartment", "decisionDepartment", "regInstitute", "sourceName",
+)
 
 
 def _provider_error(code: ProviderFailureCode, retryable: bool) -> ProviderError:
@@ -38,6 +90,7 @@ class TianyanMcpAdapter:
         core_url: str = "https://mcp.tianyancha.com/v1/core/tools/call",
         client: httpx.Client | None = None,
         sleep: Callable[[float], None] | None = None,
+        detail_page_size: int = 100,
     ) -> None:
         """保存服务端凭据和可替换 HTTP 依赖，不在构造时发起网络调用。"""
         if not authorization.strip():
@@ -46,36 +99,19 @@ class TianyanMcpAdapter:
         self._core_url = core_url
         self._client = client or httpx.Client(timeout=8.0)
         self._sleep = sleep or time.sleep
+        if not 1 <= detail_page_size <= 100:
+            raise ValueError("detail_page_size must be between 1 and 100")
+        self._detail_page_size = detail_page_size
 
-    def search(self, command: SearchCommand) -> ProviderSearchPage:
-        """调用 search_companies，只规范化候选，不选择主体。"""
-        page_number = 1
-        if command.cursor is not None:
-            try:
-                page_number = int(command.cursor)
-            except ValueError as exc:
-                raise _provider_error("UPSTREAM_INVALID", False) from exc
-            if page_number < 1:
-                raise _provider_error("UPSTREAM_INVALID", False)
-
-        body = {
-            "tool_name": "search_companies",
-            "arguments": {
-                "searchKey": command.query.strip(),
-                "pageNum": page_number,
-                "pageSize": command.page_size,
-            },
-            "format": "json",
-        }
+    def _call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """调用一次 Shared Core 工具并统一处理重试、鉴权和 JSON 外壳。"""
+        body = {"tool_name": tool_name, "arguments": arguments, "format": "json"}
         response: httpx.Response | None = None
         for attempt in range(2):
             try:
                 response = self._client.post(
                     self._core_url,
-                    headers={
-                        "Authorization": self._authorization,
-                        "Accept": "application/json",
-                    },
+                    headers={"Authorization": self._authorization, "Accept": "application/json"},
                     json=body,
                     timeout=8.0,
                 )
@@ -109,9 +145,34 @@ class TianyanMcpAdapter:
 
         try:
             envelope: Any = response.json()
+            if not isinstance(envelope, dict) or envelope.get("tool_name") != tool_name:
+                raise TypeError("invalid envelope")
             content: Any = envelope["content"]
             if isinstance(content, str):
                 content = json.loads(content)
+            if not isinstance(content, dict):
+                raise TypeError("invalid content")
+            return content
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise _provider_error("UPSTREAM_INVALID", False) from exc
+
+    def search(self, command: SearchCommand) -> ProviderSearchPage:
+        """调用 search_companies，只规范化候选，不选择主体。"""
+        page_number = 1
+        if command.cursor is not None:
+            try:
+                page_number = int(command.cursor)
+            except ValueError as exc:
+                raise _provider_error("UPSTREAM_INVALID", False) from exc
+            if page_number < 1:
+                raise _provider_error("UPSTREAM_INVALID", False)
+
+        try:
+            content = self._call_tool("search_companies", {
+                "searchKey": command.query.strip(),
+                "pageNum": page_number,
+                "pageSize": command.page_size,
+            })
             if not isinstance(content, dict) or not isinstance(content.get("items"), list):
                 raise TypeError("invalid content")
             total_raw = content.get("total")
@@ -151,5 +212,223 @@ class TianyanMcpAdapter:
             raise _provider_error("UPSTREAM_INVALID", False) from exc
 
     def fetch_category(self, subject: Subject, category: Category) -> ProviderCategoryBatch:
-        """分类查询将在各类别映射确认后逐项实现。"""
-        raise NotImplementedError()
+        """按固定子工具计划完整取得一个类别；任何部分失败都拒绝整个批次。"""
+        records: list[ProviderRecord] = []
+        for tool_name, paged in _CATEGORY_TOOL_PLAN[category]:
+            if paged:
+                tool_records = self._fetch_paged_tool(subject, tool_name)
+            else:
+                content = self._call_tool(tool_name, {"searchKey": subject.credit_code.root})
+                tool_records = self._registration_records(subject, tool_name, content)
+            if len(records) + len(tool_records) > 200:
+                raise _provider_error("UPSTREAM_INCOMPLETE", False)
+            records.extend(tool_records)
+
+        if len({record.record_id for record in records}) != len(records):
+            raise _provider_error("UPSTREAM_INVALID", False)
+        return ProviderCategoryBatch(
+            binding_credit_code=subject.credit_code.root,
+            category=category,
+            queried_at=datetime.now(timezone.utc),
+            scope_description=_CATEGORY_SCOPE[category],
+            records=records,
+        )
+
+    def _fetch_paged_tool(self, subject: Subject, tool_name: str) -> list[ProviderRecord]:
+        """完整读取一个明细工具的所有页面，并核对页码、总数和类别预算。"""
+        records: list[ProviderRecord] = []
+        expected_total: int | None = None
+        page_number = 1
+        while True:
+            content = self._call_tool(tool_name, {
+                "searchKey": subject.credit_code.root,
+                "pageNum": page_number,
+                "pageSize": self._detail_page_size,
+            })
+            items, total, has_more = self._extract_page(content, page_number)
+            if expected_total is None:
+                expected_total = total
+                if total > 200:
+                    raise _provider_error("UPSTREAM_INCOMPLETE", False)
+            elif total != expected_total:
+                raise _provider_error("UPSTREAM_INCOMPLETE", False)
+            for item in items:
+                records.append(self._make_record(subject, tool_name, item, nested_metadata=False))
+            if len(records) > 200:
+                raise _provider_error("UPSTREAM_INCOMPLETE", False)
+            if not has_more:
+                break
+            if not items:
+                raise _provider_error("UPSTREAM_INCOMPLETE", False)
+            page_number += 1
+
+        if expected_total is None or len(records) != expected_total:
+            raise _provider_error("UPSTREAM_INCOMPLETE", False)
+        return records
+
+    def _extract_page(
+        self, content: dict[str, Any], expected_page: int,
+    ) -> tuple[list[dict[str, Any]], int, bool]:
+        """解析直接 items 或 sources 聚合分页结构，不猜测缺失的分页元数据。"""
+        self._reject_warnings(content)
+        if isinstance(content.get("items"), list):
+            return self._page_part(content, expected_page)
+
+        sources = content.get("sources")
+        if not isinstance(sources, dict):
+            raise _provider_error("UPSTREAM_INVALID", False)
+        all_items: list[dict[str, Any]] = []
+        total = 0
+        has_more = False
+        for source in sources.values():
+            if not isinstance(source, dict):
+                raise _provider_error("UPSTREAM_INVALID", False)
+            self._reject_warnings(source)
+            if source.get("_empty") is True or source.get("empty") is True:
+                source = {**source, "items": source.get("items", []), "total": source.get("total", 0)}
+            part_items, part_total, part_more = self._page_part(source, expected_page)
+            all_items.extend(part_items)
+            total += part_total
+            has_more = has_more or part_more
+        return all_items, total, has_more
+
+    def _page_part(
+        self, content: dict[str, Any], expected_page: int,
+    ) -> tuple[list[dict[str, Any]], int, bool]:
+        """校验单一分页分片，拒绝布尔数值及不一致的分页声明。"""
+        try:
+            raw_items = content["items"]
+            if not isinstance(raw_items, list) or any(not isinstance(item, dict) for item in raw_items):
+                raise TypeError("invalid items")
+            raw_total = content["total"]
+            raw_page = content.get("pageNum", expected_page)
+            raw_size = content.get("pageSize", self._detail_page_size)
+            if any(isinstance(value, bool) for value in (raw_total, raw_page, raw_size)):
+                raise TypeError("invalid pagination")
+            total, page_number, page_size = int(raw_total), int(raw_page), int(raw_size)
+            if total < 0 or page_number != expected_page or page_size < 1 or len(raw_items) > page_size:
+                raise ValueError("invalid pagination")
+            if len(raw_items) > total:
+                raise ValueError("invalid total")
+            return raw_items, total, page_number * page_size < total
+        except (KeyError, TypeError, ValueError) as exc:
+            raise _provider_error("UPSTREAM_INVALID", False) from exc
+
+    def _registration_records(
+        self, subject: Subject, tool_name: str, content: dict[str, Any],
+    ) -> list[ProviderRecord]:
+        """把工商登记的多源对象合并成一条记录，保留认缴与实缴原字段。"""
+        self._reject_warnings(content)
+        if content.get("_empty") is True:
+            return []
+        if content.get("items") == [] and content.get("total") == 0:
+            return []
+        sources = content.get("sources")
+        if not isinstance(sources, dict) or not sources:
+            raise _provider_error("UPSTREAM_INVALID", False)
+        for source in sources.values():
+            if not isinstance(source, dict):
+                raise _provider_error("UPSTREAM_INVALID", False)
+            self._reject_warnings(source)
+        if all(
+            isinstance(value, dict) and (value.get("empty") is True or value.get("_empty") is True)
+            for value in sources.values()
+        ):
+            return []
+        return [self._make_record(subject, tool_name, {"sources": sources}, nested_metadata=True)]
+
+    def _make_record(
+        self, subject: Subject, tool_name: str, raw: dict[str, Any], *, nested_metadata: bool,
+    ) -> ProviderRecord:
+        """生成稳定记录并移除提供方评分和联系方式，不截断正文。"""
+        credit_raw = self._find_value(raw, _CREDIT_KEYS, recursive=nested_metadata)
+        credit_code: CreditCode | None = None
+        if credit_raw not in (None, ""):
+            try:
+                credit_code = CreditCode(str(credit_raw).strip())
+            except ValidationError as exc:
+                raise _provider_error("UPSTREAM_INVALID", False) from exc
+            if credit_code.root != subject.credit_code.root:
+                raise _provider_error("SUBJECT_RESPONSE_MISMATCH", False)
+
+        cleaned = self._clean_value(raw)
+        if not isinstance(cleaned, dict) or not cleaned:
+            raise _provider_error("UPSTREAM_INVALID", False)
+        content = json.dumps(
+            {"tool": tool_name, "data": cleaned}, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        )
+        if len(content) > 4000:
+            raise _provider_error("UPSTREAM_INCOMPLETE", False)
+
+        explicit_id = self._find_value(raw, _ID_KEYS, recursive=nested_metadata)
+        canonical = json.dumps(cleaned, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        suffix = str(explicit_id).strip() if explicit_id not in (None, "") else hashlib.sha256(
+            canonical.encode("utf-8")
+        ).hexdigest()[:32]
+        record_id = f"{tool_name}:{suffix}"
+        if len(record_id) > 256:
+            record_id = f"{tool_name}:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+
+        event_time = self._small_text(self._find_value(raw, _TIME_KEYS, recursive=nested_metadata))
+        source_url = self._small_text(self._find_value(raw, _URL_KEYS, recursive=nested_metadata), 2048)
+        publisher = self._small_text(self._find_value(raw, _PUBLISHER_KEYS, recursive=nested_metadata))
+        try:
+            return ProviderRecord(
+                record_id=record_id,
+                content=content,
+                record_credit_code=None if credit_code is None else credit_code.root,
+                event_time=event_time,
+                source_url=source_url,
+                source_publisher=publisher,
+            )
+        except ValidationError as exc:
+            raise _provider_error("UPSTREAM_INVALID", False) from exc
+
+    def _clean_value(self, value: Any) -> Any:
+        """递归清理评分、评级和联系方式字段，其他公开事实保持原样。"""
+        if isinstance(value, dict):
+            cleaned: dict[str, Any] = {}
+            for key, child in value.items():
+                normalized = "".join(character for character in str(key).lower() if character.isalnum())
+                if str(key).startswith("_") or any(part in normalized for part in _SENSITIVE_KEY_PARTS):
+                    continue
+                cleaned[str(key)] = self._clean_value(child)
+            return cleaned
+        if isinstance(value, list):
+            return [self._clean_value(item) for item in value]
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        raise _provider_error("UPSTREAM_INVALID", False)
+
+    def _find_value(self, value: Any, keys: tuple[str, ...], *, recursive: bool) -> Any:
+        """按确定字段优先级取元数据；仅工商聚合对象允许向下查找。"""
+        if not isinstance(value, dict):
+            return None
+        for key in keys:
+            if value.get(key) not in (None, ""):
+                return value[key]
+        if recursive:
+            for child in value.values():
+                found = self._find_value(child, keys, recursive=True)
+                if found not in (None, ""):
+                    return found
+        return None
+
+    def _reject_warnings(self, value: Any) -> None:
+        """任何非空上游警告都视为未完整取得。"""
+        if not isinstance(value, dict):
+            return
+        warnings = value.get("_warnings")
+        if warnings not in (None, "", []):
+            raise _provider_error("UPSTREAM_INCOMPLETE", False)
+
+    def _small_text(self, value: Any, maximum: int = 256) -> str | None:
+        """把可选元数据规范化为受限非空文本，拒绝静默截断。"""
+        if value in (None, ""):
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if len(text) > maximum:
+            raise _provider_error("UPSTREAM_INVALID", False)
+        return text
