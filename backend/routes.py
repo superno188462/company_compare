@@ -84,15 +84,20 @@ def confirm_subject(
 
 
 @router.put("/sessions/{sid}/draft", response_model=ManualDraft, summary="保存待修改草稿", description="BE-IF-04：草稿保存不接纳证据、不触发LLM。")
-def save_draft(sid: UUID, draft: EditableDraft, actor: TrustedActor, key: IdempotencyKey) -> ManualDraft:
-    """草稿保存占位。"""
-    raise NotImplementedError()
+def save_draft(
+    sid: UUID, draft: EditableDraft, actor: TrustedActor,
+    key: IdempotencyKey, service: SearchService,
+) -> ManualDraft:
+    """保存私有待修改草稿，不接纳为证据。"""
+    return service.save_draft(actor, sid, draft, key)
 
 
 @router.delete("/sessions/{sid}/draft", status_code=204, response_model=None, summary="清空草稿", description="明确清空内容及快照来源关联。")
-def clear_draft(sid: UUID, actor: TrustedActor, key: IdempotencyKey) -> None:
-    """BE-IF-04：草稿清空占位。"""
-    raise NotImplementedError()
+def clear_draft(
+    sid: UUID, actor: TrustedActor, key: IdempotencyKey, service: SearchService,
+) -> None:
+    """BE-IF-04：明确清空当前草稿及其快照关联。"""
+    service.clear_draft(actor, sid, key)
 
 
 @router.post("/sessions/{sid}/evidence", response_model=OperationHandle, status_code=202, summary="提交线索并自动分析", description="校验服务端草稿、主体、知情确认与共享同意。")

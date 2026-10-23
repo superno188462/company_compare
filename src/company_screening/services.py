@@ -4,6 +4,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import hashlib
+import re
 from threading import RLock
 from typing import ClassVar
 from uuid import UUID, uuid4
@@ -172,6 +173,75 @@ class SessionService:
             self._sessions[handle.session_id] = (actor.actor_id, updated)
             return True
 
+    def _save_draft(
+        self,
+        actor: ActorContext,
+        sid: UUID,
+        draft: EditableDraft,
+    ) -> ManualDraft:
+        """在会话锁内保存私有草稿；草稿不进入证据或报告。"""
+        with self._lock:
+            entry = self._sessions.get(sid)
+            if entry is None or entry[0] != actor.actor_id:
+                info = ErrorInfo(code="RESOURCE_NOT_FOUND", hint_id=HintCode.INTERNAL_ERROR,
+                                 fields=[], retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+            state = entry[1]
+            if state.current_subject is None:
+                info = ErrorInfo(code="SUBJECT_UNCONFIRMED", hint_id=HintCode.CONFIRM_SUBJECT,
+                                 fields=[], retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+
+            source_url = draft.source_url
+            if source_url is not None and not source_url.strip():
+                source_url = None
+            normalized = draft.model_copy(update={"source_url": source_url})
+            code = (draft.record_credit_code or "").strip()
+            issues: list[HintCode] = []
+            if not code:
+                issues.append(HintCode.CREDIT_MISSING)
+            elif code != state.current_subject.credit_code.root:
+                issues.append(HintCode.CREDIT_MISMATCH)
+
+            content_codes = set(re.findall(
+                r"(?<![0-9A-Z])[0-9ABCDEFGHJKLMNPQRTUWXY]{18}(?![0-9A-Z])",
+                draft.content.upper(),
+            ))
+            if code and any(content_code != code for content_code in content_codes):
+                issues.append(HintCode.CREDIT_CONFLICT)
+            has_source_url = source_url is not None and re.fullmatch(r"https?://[^\s]+", source_url) is not None
+            has_observed_at = draft.observed_at is not None and bool(draft.observed_at.strip())
+            if not has_source_url or not has_observed_at:
+                issues.append(HintCode.SOURCE_INFO_MISSING)
+
+            from_snapshot_id = state.draft.from_snapshot_id if state.draft is not None else None
+            saved = ManualDraft(
+                **normalized.model_dump(),
+                draft_id=uuid4(),
+                from_snapshot_id=from_snapshot_id,
+                issues=issues,
+            )
+            updated = state.model_copy(update={"draft": saved})
+            self._sessions[sid] = (actor.actor_id, updated)
+            return saved.model_copy(deep=True)
+
+    def _clear_draft(self, actor: ActorContext, sid: UUID) -> None:
+        """在会话锁内清除草稿及其快照来源关联。"""
+        with self._lock:
+            entry = self._sessions.get(sid)
+            if entry is None or entry[0] != actor.actor_id:
+                info = ErrorInfo(code="RESOURCE_NOT_FOUND", hint_id=HintCode.INTERNAL_ERROR,
+                                 fields=[], retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+            state = entry[1]
+            self._sessions[sid] = (actor.actor_id, state.model_copy(update={"draft": None}))
+
 
 class ScreeningService:
     """搜索、证据提交和受控报告工作流边界。"""
@@ -179,6 +249,10 @@ class ScreeningService:
     _searches: ClassVar[dict[UUID, tuple[UUID, UUID, datetime, SearchResult]]] = {}
     _idempotency: ClassVar[dict[tuple[UUID, UUID, UUID], tuple[str, SearchResult]]] = {}
     _confirm_idempotency: ClassVar[dict[tuple[UUID, UUID, UUID], tuple[str, OperationHandle]]] = {}
+    _draft_idempotency: ClassVar[
+        dict[tuple[UUID, UUID, UUID], tuple[str, int, ManualDraft]]
+    ] = {}
+    _clear_draft_idempotency: ClassVar[set[tuple[UUID, UUID, UUID]]] = set()
     _operations: ClassVar[dict[UUID, tuple[UUID, UUID, int, OperationView]]] = {}
     _lock: ClassVar[RLock] = RLock()
     _query_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(
@@ -571,11 +645,44 @@ class ScreeningService:
 
     def save_draft(self, actor: ActorContext, sid: UUID, draft: EditableDraft, key: UUID) -> ManualDraft:
         """BE-IF-04：保存草稿，不接纳证据或调用模型。"""
-        raise NotImplementedError()
+        workspace = self._session_service.restore(actor, sid)
+        self._session_service.activity(actor, sid)
+        if workspace.current_subject is None:
+            info = ErrorInfo(code="SUBJECT_UNCONFIRMED", hint_id=HintCode.CONFIRM_SUBJECT,
+                             fields=[], retryable=False)
+            error = ApplicationError(info.code)
+            error.info = info
+            raise error
+        fingerprint = draft.model_dump_json()
+        idempotency_key = (actor.actor_id, sid, key)
+        with self._lock:
+            existing = self._draft_idempotency.get(idempotency_key)
+            if existing is not None:
+                if existing[0] != fingerprint or existing[1] != workspace.session_generation:
+                    info = ErrorInfo(code="IDEMPOTENCY_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT,
+                                     fields=[], retryable=False)
+                    error = ApplicationError(info.code)
+                    error.info = info
+                    raise error
+                return existing[2].model_copy(deep=True)
+            saved = self._session_service._save_draft(actor, sid, draft)
+            self._draft_idempotency[idempotency_key] = (
+                fingerprint,
+                workspace.session_generation,
+                saved.model_copy(deep=True),
+            )
+            return saved
 
     def clear_draft(self, actor: ActorContext, sid: UUID, key: UUID) -> None:
         """BE-IF-04：明确清空当前草稿及其预填充关联。"""
-        raise NotImplementedError()
+        self._session_service.restore(actor, sid)
+        self._session_service.activity(actor, sid)
+        idempotency_key = (actor.actor_id, sid, key)
+        with self._lock:
+            if idempotency_key in self._clear_draft_idempotency:
+                return
+            self._session_service._clear_draft(actor, sid)
+            self._clear_draft_idempotency.add(idempotency_key)
 
     def submit(self, actor: ActorContext, sid: UUID, command: SubmitEvidenceCommand, key: UUID) -> OperationHandle:
         """BE-IF-04：校验后接纳、按同意范围共享并自动分析。"""
