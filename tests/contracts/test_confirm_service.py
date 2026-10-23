@@ -186,4 +186,3 @@ def test_confirm_idempotency_replays_and_rejects_changed_command() -> None:
     with pytest.raises(ApplicationError) as caught:
         service.confirm(actor, workspace.session_id, changed, key)
     assert caught.value.info.code == "IDEMPOTENCY_CONFLICT"
-
