@@ -110,3 +110,11 @@
 当前全量：57通过、2失败（搜索/确认服务仍为NotImplementedError），没有skip/xfail。严格类型检查13个源文件通过；React生产构建和结构检查通过。结构检查保留原签名约束，并明确区分8个已实现函数/方法与27个占位。
 
 真实本地Uvicorn烟测：`/docs` 200、`/openapi.json`包含13个路由；未实现鉴权触发的500响应为脱敏ErrorEnvelope，服务器日志没有该异常正文/堆栈。测试里的合成身份通过dependency_overrides注入，实际Cookie鉴权、业务端点、真实提供方及LLM仍未完成，不将文档可访问等同于业务可用。
+
+### 2026-10-23 天眼查 MCP 搜索适配器
+
+用户提供天眼 AI 配置页及 MCP API Key 后，先依据天眼查官方 `tyc-cli` 核验当前协议：MCP 入口为 `https://mcp.tianyancha.com/mcp`，应用调用无会话 Shared Core `POST /v1/core/tools/call`，主体锚定工具为 `search_companies`。真实 Key 只写入被 Git 忽略的本机 `.env`，仓库提交 `.env.example` 占位。
+
+真实集成最小验证包括一次 `/v1/core/auth/ready` 鉴权健康检查和一次官方 README 示例企业的两条候选搜索；两者均成功。真实结果仅用于确认字段结构，没有写入仓库测试夹具，也没有把 Key 输出到日志。该调用只能证明当时凭据与搜索工具可用，不能证明各详情类别已授权。
+
+新增 [test_tianyan_mcp_adapter.py](contracts/test_tianyan_mcp_adapter.py) 10项假传输测试，覆盖请求头与工具参数、空结果、页码游标、候选字段规范化、401/403/429/400错误映射、一次瞬时失败重试及非法响应拒绝，全部通过。全量当前为67通过、2项占位失败；严格类型检查15个源文件通过。`ScreeningService.search/confirm`、Cookie身份和HTTP业务路由仍未接通，因此前端当前还不能发起真实搜索。

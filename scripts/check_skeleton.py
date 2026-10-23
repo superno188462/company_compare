@@ -30,6 +30,9 @@ IMPLEMENTED = {
     ("backend/error_handlers.py", "application_error"),
     ("backend/error_handlers.py", "internal_error"),
     ("backend/error_handlers.py", "sanitize_unhandled"),
+    ("src/company_screening/adapters/tianyan_mcp.py", "_provider_error"),
+    ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter.__init__"),
+    ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter.search"),
 }
 
 SERVICE_PARAMETERS = {

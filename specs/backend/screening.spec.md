@@ -4,12 +4,12 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 标识 / 文档版本 | SDD-BE-SCREENING / v1.4 |
+| 标识 / 文档版本 | SDD-BE-SCREENING / v1.5 |
 | 行为契约 | CONTRACT-1.0，SDD与首批测试已确认；逐函数实现中 |
 | PRD / UI 基线 | [PRD-1.0](../common/prd.md)、[UI-1.0](../common/ui_notes.md) |
 | 共享定义 | [global_schema.md](../common/global_schema.md)、[输入 Schema](../../contracts/input-schema.json)、[输出 Schema](../../contracts/output-schema.json) |
 | 责任人 / 评审人 | 项目开发者（用户本人） |
-| 日期 / 状态 | 2026-10-23 / 已实现会话create/restore/reset、HTTP入口及错误包；鉴权与业务HTTP路由待接通 |
+| 日期 / 状态 | 2026-10-23 / 已实现会话create/restore/reset、HTTP入口、错误包及天眼查MCP搜索适配器；鉴权与业务HTTP路由待接通 |
 
 | 日期 | 版本 | 变更 | 评审记录 |
 | --- | --- | --- | --- |
@@ -19,6 +19,7 @@
 | 2026-10-23 | v1.2 | 追加首批50个可执行契约用例与实际结果，CONTRACT-1.0不变 | 用户回复“可以继续吧”授权继续准备测试；42通过/8占位失败，测试待评审，见 tests/test-cases.md |
 | 2026-10-23 | v1.3 | 首批测试确认后逐函数实现会话create/restore/reset，行为契约不变 | 用户回复“继续，第一步是开发什么？”；50用例中46通过/4占位失败；进程内存切片，完整存储与HTTP待实现 |
 | 2026-10-23 | v1.4 | BE-ERR-01增加通用字段校验文案键input_invalid，接通HTTP应用装配及统一错误包 | 用户明确选择“新增通用提示（推荐）”；业务字段/方法签名不变，文案基线TEXT-1.1，测试与实现记录见tests/test-cases.md |
+| 2026-10-23 | v1.5 | 核验天眼查当前MCP Shared Core搜索协议并实现CompanyDataPort搜索适配器；CONTRACT-1.0不变 | 用户提供天眼AI页面及MCP API Key继续真实接入；鉴权健康检查与一次最小搜索通过，适配器测试见tests/test-cases.md |
 
 ## 2. 目标与范围
 
@@ -40,7 +41,7 @@
 | 会话/共享存储 | 主体隔离、原子接纳、版本、幂等和期限能力 | 会话保存失败不启动分析；共享故障可保留已存会话材料 |
 | 时钟/标识/匿名所有者验证 | 服务端时间、不可预测公开 ID、验证过的所有者上下文 | 测试替换时钟与身份，不信任客户端时间/所有者 ID |
 
-提供方原始地址及字段映射属于适配器设计，必须在真实接入前核验。当前有公开依据的能力包括 [工商基本信息](https://open.tianyancha.com/open/365)、[司法协助](https://open.tianyancha.com/open/756)、[企业年报](https://open.tianyancha.com/open/825)；它们不代表已开通权限，也不代表覆盖所有司法或资产线索。搜索新版地址本轮尚未由可访问官方当前文档确认，不能用旧文档地址冒充完成接入。
+提供方原始地址及字段映射属于适配器设计，必须在真实接入前核验。天眼查官方 [tyc-cli](https://github.com/tyc-tech/tyc-cli) 当前说明 MCP 入口为 `https://mcp.tianyancha.com/mcp`，应用使用其无会话 Shared Core `POST /v1/core/tools/call`，搜索工具为 `search_companies`；认证值只放在服务端 `Authorization` 请求头。该搜索返回主体锚定字段，但不返回注册省市，适配器必须将未知地区保留为 null，不能猜测。已有公开依据的分类能力还包括 [工商基本信息](https://open.tianyancha.com/open/365)、[司法协助](https://open.tianyancha.com/open/756)、[企业年报](https://open.tianyancha.com/open/825)；它们属于另一套 OpenAPI 文档，仅用于后续能力映射参考，不代表当前 MCP Key 已开通全部工具，也不代表覆盖所有司法或资产线索。
 
 分析方法参照 [skill.md](../analysis/skill.md)，运行时固定提示词为 [llm-system-prompt.txt](../analysis/llm-system-prompt.txt)。Skill 是规则材料，不是具备网络能力的运行时服务。
 
@@ -230,7 +231,7 @@
 
 ## 9. 验收与追踪
 
-测试规划及执行结果见 [test-cases.md](../../tests/test-cases.md)。包含TEXT-1.1补充用例后，当前57项通过、2项因占位失败；其余行为、Mock提供方流程和集成专项仍待补齐，不代表完整系统已通过验收。
+测试规划及执行结果见 [test-cases.md](../../tests/test-cases.md)。包含天眼查搜索适配器用例后，当前67项通过、2项因搜索/确认应用服务占位失败；其余行为、分类查询、HTTP接线和集成专项仍待补齐，不代表完整系统已通过验收。
 
 | 条款 | 验收条目 / 计划用例 | 验证归属 |
 | --- | --- | --- |
@@ -240,6 +241,6 @@
 | IF-06、DATA-03/05 | AC-14、16；TC-23～26、TC-29 | 状态/并发/幂等契约与存储集成 |
 | NFR-01～03 | AC-15～17；TC-26、TC-28～32 | 超时、清理、隔离、重启与浏览器专项 |
 
-待真实接入核验：提供方账号与当前搜索/类别映射、模型上下文与接入协议、官网浏览器可用性。公共服务失败语义已定义，外部适配器尚未验证，不能据此宣称真实系统可用。
+已核验天眼查 MCP Key 鉴权健康检查、当前搜索工具请求和一次最小真实返回；真实凭据仅保存在被 Git 忽略的本机 `.env`。待核验项仍包括各详情类别的工具/权限映射、模型上下文与接入协议、官网浏览器可用性。搜索适配器尚未接入 `ScreeningService` 与 HTTP 路由，不能据此宣称工作台已可搜索。
 
 本阶段的实际骨架文件、映射与检查结果见 [骨架评审记录](../common/skeleton-review.md)。正式契约测试仍待骨架评审通过后编写。
