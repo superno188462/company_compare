@@ -1,7 +1,268 @@
-import dictionary from "../../contracts/text-dict.json";
+import { useEffect, useRef, useState } from "react";
 
-/** React 工程的初始外壳；没有会话、数据查询、模拟报告或业务状态转换。 */
+import dictionary from "../../contracts/text-dict.json";
+import { ApiClientError, screeningApi } from "./api/client.js";
+import {
+  CandidateList, CoveragePanel, EvidenceCard, ManualEvidenceForm, OfficialLinks,
+  ReportPanel, SearchPanel, SubjectHeader,
+} from "./components/WorkspacePanels.js";
+import type {
+  EditableDraft, ManualDraft, OperationHandle, SearchResult, UUID, WorkspaceState,
+} from "./contracts/boundary.js";
+
+const SESSION_STORAGE_KEY = "company-screening-session-id";
+let workspaceInitialization: Promise<WorkspaceState> | null = null;
+
+type Notice = { tone: "info" | "warning" | "error" | "success"; text: string };
+
+function newKey(): UUID {
+  return crypto.randomUUID();
+}
+
+function editableDraft(draft: ManualDraft): EditableDraft {
+  return {
+    record_credit_code: draft.record_credit_code,
+    content: draft.content,
+    source_url: draft.source_url,
+    observed_at: draft.observed_at,
+    event_time: draft.event_time,
+    category: draft.category,
+  };
+}
+
+function emptyDraft(creditCode: string): EditableDraft {
+  return {
+    record_credit_code: creditCode,
+    content: "",
+    source_url: null,
+    observed_at: null,
+    event_time: null,
+    category: "other",
+  };
+}
+
+function errorNotice(error: unknown): Notice {
+  if (error instanceof ApiClientError) {
+    return { tone: "error", text: dictionary.hints[error.info.hint_id].text };
+  }
+  return { tone: "error", text: dictionary.hints.INTERNAL_ERROR.text };
+}
+
+function hasDraftContent(draft: EditableDraft | null): boolean {
+  return draft !== null && Boolean(
+    draft.content.trim() || draft.source_url || draft.observed_at || draft.event_time,
+  );
+}
+
+async function initializeWorkspace(): Promise<WorkspaceState> {
+  if (workspaceInitialization !== null) return workspaceInitialization;
+  workspaceInitialization = (async () => {
+    const storedSid = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    let server: WorkspaceState;
+    if (storedSid !== null) {
+      try {
+        server = await screeningApi.restoreSession(storedSid);
+      } catch (error) {
+        if (!(error instanceof ApiClientError) || ![404, 410].includes(error.status)) throw error;
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
+        server = await screeningApi.createSession(newKey());
+      }
+    } else {
+      server = await screeningApi.createSession(newKey());
+    }
+    sessionStorage.setItem(SESSION_STORAGE_KEY, server.session_id);
+    return server;
+  })();
+  return workspaceInitialization;
+}
+
 export function App() {
+  const draftRevisionRef = useRef(0);
+  const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
+  const [queryText, setQueryText] = useState("");
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
+  const [localDraft, setLocalDraft] = useState<EditableDraft | null>(null);
+  const [activeOperation, setActiveOperation] = useState<OperationHandle | null>(null);
+  const [initializing, setInitializing] = useState(true);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void initializeWorkspace()
+      .then((server) => {
+        if (cancelled) return;
+        setWorkspace(server);
+        setActiveOperation(server.active_operation);
+        if (server.draft !== null) setLocalDraft(editableDraft(server.draft));
+        else if (server.current_subject !== null) setLocalDraft(emptyDraft(server.current_subject.credit_code));
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setNotice(errorNotice(error));
+      })
+      .finally(() => {
+        if (!cancelled) setInitializing(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (workspace === null || activeOperation === null) return;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const poll = async () => {
+      try {
+        const view = await screeningApi.getOperation(workspace.session_id, activeOperation.operation_id);
+        if (cancelled) return;
+        if (view.state === "queued" || view.state === "running") {
+          setNotice({ tone: "info", text: dictionary.operation_phase_labels[view.phase] });
+          timer = window.setTimeout(() => { void poll(); }, 2000);
+          return;
+        }
+        setActiveOperation(null);
+        if (view.state === "failed") {
+          setNotice(view.error === null
+            ? { tone: "error", text: dictionary.hints.INTERNAL_ERROR.text }
+            : { tone: "error", text: dictionary.hints[view.error.hint_id].text });
+          return;
+        }
+        const restored = await screeningApi.restoreSession(workspace.session_id);
+        if (cancelled) return;
+        setWorkspace(restored);
+        const result = view.result;
+        if (result !== null) {
+          const firstHint = result.ui_hint_group[0];
+          setNotice(firstHint === undefined
+            ? { tone: "success", text: "企业资料查询已完成。" }
+            : {
+              tone: dictionary.hints[firstHint].severity === "error" ? "error" : "warning",
+              text: dictionary.hints[firstHint].text,
+            });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setNotice(errorNotice(error));
+          timer = window.setTimeout(() => { void poll(); }, 3000);
+        }
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [activeOperation, workspace?.session_id]);
+
+  const handleSearch = async () => {
+    if (workspace === null) return;
+    const query = queryText.trim();
+    if (!query) {
+      setNotice({ tone: "warning", text: dictionary.validation.company_name_required });
+      return;
+    }
+    setActionBusy(true);
+    setNotice({ tone: "info", text: "正在搜索候选企业…" });
+    try {
+      const result = await screeningApi.search(
+        workspace.session_id,
+        { query, page_size: 20, cursor: null },
+        newKey(),
+      );
+      setSearchResult(result);
+      setNotice(result.items.length === 0
+        ? { tone: "warning", text: dictionary.hints.SEARCH_EMPTY.text }
+        : { tone: "info", text: dictionary.hints.CONFIRM_SUBJECT.text });
+    } catch (error) {
+      setNotice(errorNotice(error));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleConfirm = async (candidateId: UUID) => {
+    if (workspace === null || searchResult === null) return;
+    const candidate = searchResult.items.find((item) => item.candidate_id === candidateId);
+    if (candidate === undefined || !candidate.selectable || candidate.credit_code === null) return;
+    const mustDiscard = workspace.draft !== null || hasDraftContent(localDraft);
+    if (mustDiscard && !window.confirm(dictionary.dialogs.switch_subject_body)) return;
+
+    setActionBusy(true);
+    setNotice({ tone: "info", text: "正在确认主体并启动资料查询…" });
+    try {
+      const handle = await screeningApi.confirmSubject(
+        workspace.session_id,
+        {
+          search_id: searchResult.search_id,
+          candidate_id: candidateId,
+          expected_generation: workspace.session_generation,
+          discard_draft: workspace.draft !== null,
+        },
+        newKey(),
+      );
+      const restored = await screeningApi.restoreSession(workspace.session_id);
+      setWorkspace(restored);
+      setSearchResult(null);
+      setActiveOperation(handle);
+      draftRevisionRef.current += 1;
+      setLocalDraft(emptyDraft(candidate.credit_code));
+      setNotice({ tone: "info", text: dictionary.operation_phase_labels.query });
+    } catch (error) {
+      setNotice(errorNotice(error));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleDraftChange = (draft: EditableDraft) => {
+    draftRevisionRef.current += 1;
+    setLocalDraft(draft);
+  };
+
+  const handleSaveDraft = async () => {
+    if (workspace === null || localDraft === null) return;
+    const submittedRevision = draftRevisionRef.current;
+    setActionBusy(true);
+    try {
+      const saved = await screeningApi.saveDraft(workspace.session_id, localDraft, newKey());
+      setWorkspace((current) => current === null ? current : { ...current, draft: saved });
+      if (draftRevisionRef.current === submittedRevision) setLocalDraft(editableDraft(saved));
+      setNotice({ tone: "success", text: dictionary.validation.draft_saved });
+    } catch (error) {
+      setNotice(errorNotice(error));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleClearDraft = async () => {
+    if (workspace === null || workspace.current_subject === null) return;
+    setActionBusy(true);
+    try {
+      await screeningApi.clearDraft(workspace.session_id, newKey());
+      draftRevisionRef.current += 1;
+      setLocalDraft(emptyDraft(workspace.current_subject.credit_code));
+      setWorkspace((current) => current === null ? current : { ...current, draft: null });
+      setNotice({ tone: "info", text: "草稿已清空。" });
+    } catch (error) {
+      setNotice(errorNotice(error));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleCopy = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setNotice({ tone: "success", text: "官网地址已复制。" });
+    } catch {
+      setNotice({ tone: "warning", text: dictionary.validation.clipboard_failed });
+    }
+  };
+
+  const payload = workspace?.payload ?? null;
+  const currentSubject = workspace?.current_subject ?? null;
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#workspace">跳到工作区</a>
@@ -10,86 +271,101 @@ export function App() {
           <span className="brand-mark" aria-hidden="true">企</span>
           <span>{dictionary.app_name}</span>
         </a>
-        <a className="official-shortcut" href="#official-sites">
-          {dictionary.labels.official_sites} <span aria-hidden="true">↗</span>
-        </a>
+        <div className="header-actions">
+          <span className={`connection-dot ${workspace === null ? "offline" : "online"}`} aria-hidden="true" />
+          <span>{initializing ? "正在连接" : workspace === null ? "连接失败" : "会话已连接"}</span>
+          <a className="official-shortcut" href="#official-sites">{dictionary.labels.official_sites} ↗</a>
+        </div>
       </header>
 
       <main id="workspace">
         <section className="introduction" aria-labelledby="page-title">
-          <span className="preview-tag">前端骨架预览</span>
+          <span className="preview-tag">本地开发版</span>
           <h1 id="page-title">先确认主体，再看证据。</h1>
           <p>从公开线索出发，核对来源、比较矛盾，了解材料能支持什么结论。</p>
         </section>
 
         <div className="notice">{dictionary.hints.DISCLOSURE_LIMITED.text}</div>
+        {notice !== null && <div className={`feedback feedback-${notice.tone}`} role="status">{notice.text}</div>}
 
-        <section className="panel search-panel" aria-labelledby="search-title">
-          <div className="section-heading">
-            <h2 id="search-title">搜索企业</h2>
-            <span className="muted">01 / 确认主体</span>
-          </div>
-          <label htmlFor="company-name">{dictionary.labels.company_name}</label>
-          <div className="search-controls">
-            <input id="company-name" type="search" placeholder="输入企业全称或关键词"
-              disabled aria-describedby="preview-status" />
-            <button type="button" disabled>{dictionary.actions.search}</button>
-          </div>
-          <p id="preview-status" className="field-note">
-            React 工程已就绪，搜索与分析尚未接入。当前页面没有企业数据。
-          </p>
-          <ol className="workflow" aria-label="筛查流程">
-            <li><span>1</span>搜索企业</li>
-            <li><span>2</span>人工确认主体</li>
-            <li><span>3</span>查看证据与分析</li>
-            <li><span>4</span>补充线索并刷新</li>
-          </ol>
-        </section>
+        <SearchPanel
+          queryText={queryText}
+          busy={initializing || actionBusy || workspace === null}
+          onQueryChange={setQueryText}
+          onSearch={() => { void handleSearch(); }}
+        />
+
+        {searchResult !== null && (
+          <CandidateList result={searchResult} busy={actionBusy} onConfirm={(id) => { void handleConfirm(id); }} />
+        )}
+
+        <SubjectHeader subject={currentSubject} />
+
+        {activeOperation !== null && (
+          <section className="operation-banner" aria-live="polite">
+            <span className="spinner" aria-hidden="true" />
+            <div><strong>{dictionary.labels.processing}</strong><p>{dictionary.operation_phase_labels.query}</p></div>
+          </section>
+        )}
+
+        {payload !== null && (
+          <CoveragePanel coverage={payload.api_status} busy={activeOperation !== null} onRetry={() => undefined} />
+        )}
 
         <div className="workspace-grid">
-          <section className="panel empty-panel" aria-labelledby="evidence-title">
+          <section className="panel evidence-panel" aria-labelledby="evidence-title">
             <div className="section-heading">
               <h2 id="evidence-title">{dictionary.labels.evidence}</h2>
-              <span className="muted">02 / 核对材料</span>
+              <span className="muted">{payload?.evidence_list.length ?? 0} 条</span>
             </div>
-            <div className="empty-content">
-              <span className="empty-symbol" aria-hidden="true">≡</span>
-              <h3>等待确认企业主体</h3>
-              <p>确认后，在这里查看资料覆盖、来源和逐条证据。</p>
-            </div>
+            {payload === null || payload.evidence_list.length === 0 ? (
+              <div className="empty-content">
+                <span className="empty-symbol" aria-hidden="true">≡</span>
+                <h3>{currentSubject === null ? "等待确认企业主体" : "当前没有已接纳证据"}</h3>
+                <p>{currentSubject === null ? "确认后查看资料覆盖和逐条证据。" : dictionary.hints.NO_EVIDENCE.text}</p>
+              </div>
+            ) : (
+              <div className="evidence-list">
+                {payload.evidence_list.map((item) => <EvidenceCard key={item.evidence_id} evidence={item} />)}
+              </div>
+            )}
           </section>
 
-          <section className="panel empty-panel" aria-labelledby="report-title">
-            <div className="section-heading">
-              <h2 id="report-title">{dictionary.labels.report}</h2>
-              <span className="muted">03 / 交叉分析</span>
-            </div>
-            <div className="empty-content">
-              <span className="empty-symbol" aria-hidden="true">⌁</span>
-              <h3>{dictionary.labels.no_successful_report}</h3>
-              <p>取得有效证据后生成，呈现支持材料、矛盾与信息缺口。</p>
-            </div>
-          </section>
+          {payload === null ? (
+            <section className="panel report-panel" aria-labelledby="report-title">
+              <div className="section-heading"><h2 id="report-title">{dictionary.labels.report}</h2><span className="muted">03 / 交叉分析</span></div>
+              <div className="empty-content"><span className="empty-symbol" aria-hidden="true">⌁</span><h3>{dictionary.labels.no_successful_report}</h3><p>取得有效证据后生成。</p></div>
+            </section>
+          ) : (
+            <ReportPanel summaryText={payload.summary_text} status={payload.api_status} onRetry={() => undefined} />
+          )}
         </div>
 
-        <section id="official-sites" className="panel official-panel" aria-labelledby="official-title">
-          <div className="section-heading">
-            <h2 id="official-title">{dictionary.labels.official_sites}</h2>
-            <span className="muted">自行核对原始公示</span>
-          </div>
-          <p className="field-note">{dictionary.hints.OPEN_OFFICIAL_MANUALLY.text}</p>
-          <ul className="official-list">
-            {dictionary.official_sites.map((site) => (
-              <li key={site.url}>
-                <a href={site.url} target="_blank" rel="noopener noreferrer">
-                  <span>{site.label}</span><span aria-hidden="true">↗</span>
-                </a>
-                <span className="site-address">{site.url}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="field-note">{dictionary.labels.official_copy_fallback}</p>
-        </section>
+        {currentSubject !== null && localDraft !== null && (
+          <>
+            <ManualEvidenceForm
+              draft={localDraft}
+              fromSnapshot={workspace?.draft?.from_snapshot_id !== null && workspace?.draft?.from_snapshot_id !== undefined}
+              snapshotAcknowledged={false}
+              shareConsent={false}
+              busy={actionBusy}
+              fieldErrors={{}}
+              onChange={handleDraftChange}
+              onSaveDraft={() => { void handleSaveDraft(); }}
+              onSubmit={() => undefined}
+              onClear={() => { void handleClearDraft(); }}
+              onAcknowledge={() => undefined}
+              onShareChange={() => undefined}
+            />
+            {workspace?.draft !== null && workspace?.draft !== undefined && workspace.draft.issues.length > 0 && (
+              <div className="draft-issues">
+                {workspace.draft.issues.map((hint) => <p key={hint}>{dictionary.hints[hint].text}</p>)}
+              </div>
+            )}
+          </>
+        )}
+
+        <OfficialLinks sites={dictionary.official_sites} onCopy={(url) => { void handleCopy(url); }} />
       </main>
       <footer className="app-footer">公开材料有边界，分析结论须有出处。</footer>
     </div>

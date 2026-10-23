@@ -4,12 +4,12 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 标识 / 文档版本 | SDD-FE-WORKSPACE / v1.3 |
+| 标识 / 文档版本 | SDD-FE-WORKSPACE / v1.4 |
 | 行为契约 | CONTRACT-1.0，SDD 已确认；骨架尚待评审 |
 | 基线 | [PRD-1.0](../common/prd.md)、[UI-1.0](../common/ui_notes.md) |
 | 后端/共享定义 | [后端 SDD](../backend/screening.spec.md)、[共享契约](../common/global_schema.md) |
 | 责任人 / 评审人 | 项目开发者（用户本人） |
-| 日期 / 状态 | 2026-10-22 / SDD 已通过；React 初始外壳可预览，业务交互待实现 |
+| 日期 / 状态 | 2026-10-23 / SDD 已通过；会话、搜索、人工确认、查询轮询、结果展示和私有草稿已接通 |
 
 | 日期 | 版本 | 内容 | 评审 |
 | --- | --- | --- | --- |
@@ -18,6 +18,7 @@
 | 2026-10-22 | v1.1 | 追加类型/组件 Props 骨架及严格类型检查记录，行为契约不变 | 骨架待用户评审，见 skeleton-review.md |
 | 2026-10-22 | v1.2 | 按用户指定采用 React + TypeScript + Vite，增加可启动的初始外壳；CONTRACT-1.0 不变 | 用户要求“前端请使用reacet，帮我重构一下”；本次不代表业务测试或实现获批 |
 | 2026-10-23 | v1.3 | 引用用户确认的TEXT-1.1通用字段错误键input_invalid | 用户明确选择“新增通用提示（推荐）”；ValidationMessageKey继续从字典推导，React构建通过，业务交互尚未接通 |
+| 2026-10-23 | v1.4 | 记录已按既有契约接通的 React 主线与浏览器验证；不改变 CONTRACT-1.0 | 用户继续开发；同源会话、搜索、确认、轮询、展示及草稿已接通，接纳/共享/重试仍待后端实现 |
 
 ## 2. 目标与范围
 
@@ -33,7 +34,7 @@
 
 依赖同源后端 `/api/v1`、浏览器新标签页/剪贴板/键盘能力与 [text-dict.json](../../contracts/text-dict.json)。后端类型以其模型表和 JSON Schema 为权威，前端类型从这些定义映射；不得猜字段、解析任意错误文字或直接持有天眼查/LLM 密钥。
 
-React 负责视图组合；工作台状态仍按 FE-DATA-01 归属，API Client 仍按 FE-IF-01 定义。现有 Props 通过 `frontend/src/components/registry.ts` 中的 React `ComponentType<Props>` 引用，不复制或改写字段。当前 `App.tsx` 仅为初始外壳，禁用搜索、无企业数据与业务请求；Vite 配置不提供官网抓取代理。
+React 负责视图组合；工作台状态仍按 FE-DATA-01 归属，API Client 仍按 FE-IF-01 定义。现有 Props 与组件实现沿用同一类型定义，不复制或改写字段。`App.tsx` 负责编排会话、搜索、人工确认、任务轮询、完整结果替换和草稿修订保护；Vite 只代理同源应用 API，不提供官网抓取代理。
 
 Clipboard 写入只用于用户主动复制官网地址；不读取剪贴板。官网以用户点击的新标签页导航打开，禁止 iframe、抓取代理、网页请求、DOM、截图/OCR 和跨页面内容回传。浏览器弹窗限制时提供可选中文本地址，不能把失败当作官网无信息。
 
@@ -189,4 +190,4 @@ HTTP 非成功转成保留 code/hint_id/fields/retryable 的统一客户端错�
 | ACTION-03、ERR-01 | AC-11、14、17、UI-06～08；TC-23～26、29 | 并发、恢复、版本与过期交互 |
 | RULE-01/02 | AC-12、13、16；TC-18～22、27 | 报告安全渲染及真实模型人工抽查 |
 
-验收规划见 [test-cases.md](../../tests/test-cases.md)。React 外壳的工程检查见 [骨架评审记录](../common/skeleton-review.md)；业务交互、真实浏览器兼容与端到端流程仍须单独验证。正式契约测试在骨架评审后编写。
+验收规划见 [test-cases.md](../../tests/test-cases.md)。工程和浏览器检查见 [骨架评审记录](../common/skeleton-review.md)。会话初始化、同源 API、上游失败展示已用真实 Chrome 验证；可控候选下的完整前端确认流程，以及接纳/共享/重试仍须在对应后端切片完成后验证。
