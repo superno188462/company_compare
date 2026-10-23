@@ -1,5 +1,6 @@
-"""BE-IF-02：应用服务；会话与候选搜索已实现，其余方法仍为占位。"""
+"""BE-IF-02：应用服务；会话、候选搜索与人工确认已实现。"""
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from threading import RLock
 from typing import ClassVar
@@ -11,7 +12,7 @@ from .contracts.boundary import (
     SessionExpiry, SubmitEvidenceCommand, WithdrawalResult, WorkspaceState,
 )
 from .errors import ApplicationError, ProviderError
-from .contracts.generated import HintCode
+from .contracts.generated import HintCode, NullableText, Subject
 from .ports import CompanyDataPort
 
 
@@ -87,12 +88,60 @@ class SessionService:
             del self._sessions[sid]
             self._ended[sid] = actor.actor_id
 
+    def _confirm_subject(
+        self,
+        actor: ActorContext,
+        sid: UUID,
+        subject: Subject,
+        expected_generation: int,
+        discard_draft: bool,
+        operation_id: UUID,
+    ) -> OperationHandle:
+        """在会话锁内校验代次并原子替换主体上下文。"""
+        with self._lock:
+            entry = self._sessions.get(sid)
+            if entry is None or entry[0] != actor.actor_id:
+                info = ErrorInfo(code="RESOURCE_NOT_FOUND", hint_id=HintCode.INTERNAL_ERROR,
+                                 fields=[], retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+            state = entry[1]
+            if state.session_generation != expected_generation:
+                info = ErrorInfo(code="OPERATION_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT,
+                                 fields=[], retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+            if state.draft is not None and not discard_draft:
+                info = ErrorInfo(code="OPERATION_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT,
+                                 fields=[], retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+
+            handle = OperationHandle(
+                operation_id=operation_id,
+                session_id=sid,
+                session_generation=state.session_generation + 1,
+            )
+            updated = state.model_copy(update={
+                "session_generation": handle.session_generation,
+                "current_subject": subject,
+                "payload": None,
+                "draft": None,
+                "active_operation": handle,
+            })
+            self._sessions[sid] = (actor.actor_id, updated)
+            return handle
+
 
 class ScreeningService:
     """搜索、证据提交和受控报告工作流边界。"""
 
     _searches: ClassVar[dict[UUID, tuple[UUID, UUID, datetime, SearchResult]]] = {}
     _idempotency: ClassVar[dict[tuple[UUID, UUID, UUID], tuple[str, SearchResult]]] = {}
+    _confirm_idempotency: ClassVar[dict[tuple[UUID, UUID, UUID], tuple[str, OperationHandle]]] = {}
     _lock: ClassVar[RLock] = RLock()
 
     def __init__(
@@ -100,10 +149,12 @@ class ScreeningService:
         *,
         session_service: SessionService | None = None,
         company_data: CompanyDataPort | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         """注入会话和提供方端口；缺少真实端口时不使用合成数据兜底。"""
         self._session_service = session_service or SessionService()
         self._company_data = company_data
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def search(self, actor: ActorContext, sid: UUID, command: SearchCommand, key: UUID) -> SearchResult:
         """BE-IF-03：仅返回候选，不自动确认。"""
@@ -165,7 +216,7 @@ class ScreeningService:
                 total=provider_page.total,
             )
             self._searches[result.search_id] = (
-                actor.actor_id, sid, datetime.now(timezone.utc) + timedelta(minutes=10),
+                actor.actor_id, sid, self._clock() + timedelta(minutes=10),
                 result.model_copy(deep=True),
             )
             self._idempotency[idempotency_key] = (fingerprint, result.model_copy(deep=True))
@@ -173,7 +224,67 @@ class ScreeningService:
 
     def confirm(self, actor: ActorContext, sid: UUID, command: ConfirmSubjectCommand, key: UUID) -> OperationHandle:
         """BE-IF-03：人工确认后才开始详情流水线。"""
-        raise NotImplementedError()
+        # 会话归属必须先于候选查询；确认属于明确用户活动。
+        self._session_service.restore(actor, sid)
+        self._session_service.activity(actor, sid)
+        fingerprint = command.model_dump_json()
+        idempotency_key = (actor.actor_id, sid, key)
+
+        with self._lock:
+            existing = self._confirm_idempotency.get(idempotency_key)
+            if existing is not None:
+                if existing[0] != fingerprint:
+                    info = ErrorInfo(code="IDEMPOTENCY_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT,
+                                     fields=[], retryable=False)
+                    error = ApplicationError(info.code)
+                    error.info = info
+                    raise error
+                return existing[1].model_copy(deep=True)
+
+            stored_search = self._searches.get(command.search_id)
+            if (
+                stored_search is None
+                or stored_search[0] != actor.actor_id
+                or stored_search[1] != sid
+                or self._clock() >= stored_search[2]
+            ):
+                info = ErrorInfo(code="CANDIDATE_INVALID", hint_id=HintCode.CONFIRM_SUBJECT,
+                                 fields=[], retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+
+            candidate = next(
+                (item for item in stored_search[3].items if item.candidate_id == command.candidate_id),
+                None,
+            )
+            if candidate is None or not candidate.selectable or candidate.credit_code is None:
+                info = ErrorInfo(code="CANDIDATE_INVALID", hint_id=HintCode.CONFIRM_SUBJECT,
+                                 fields=[], retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+
+            subject = Subject(
+                name=candidate.name,
+                credit_code=candidate.credit_code,
+                registered_region=(NullableText(root=candidate.registered_region)
+                                   if candidate.registered_region is not None else None),
+                legal_representative=(NullableText(root=candidate.legal_representative)
+                                      if candidate.legal_representative is not None else None),
+                established_on=candidate.established_on,
+                confirmed_at=self._clock(),
+            )
+            handle = self._session_service._confirm_subject(
+                actor,
+                sid,
+                subject,
+                command.expected_generation,
+                command.discard_draft,
+                uuid4(),
+            )
+            self._confirm_idempotency[idempotency_key] = (fingerprint, handle.model_copy(deep=True))
+            return handle
 
     def save_draft(self, actor: ActorContext, sid: UUID, draft: EditableDraft, key: UUID) -> ManualDraft:
         """BE-IF-04：保存草稿，不接纳证据或调用模型。"""

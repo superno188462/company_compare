@@ -12,9 +12,9 @@
 
 ## 现在做到哪里
 
-**前端采用 React + TypeScript + Vite，已能启动工作台外壳。** 页面提供布局预览与官网外链；搜索、证据处理和报告生成尚未接入页面。后端已经接通匿名签名 Cookie、会话创建/恢复/续期/结束，以及天眼查 MCP 候选搜索的应用服务和 HTTP 路由；主体确认、分类详情查询和模型服务尚未实现。
+**前端采用 React + TypeScript + Vite，已能启动工作台外壳。** 页面提供布局预览与官网外链；搜索、证据处理和报告生成尚未接入页面。后端已经接通匿名签名 Cookie、会话创建/恢复/续期/结束、天眼查 MCP 候选搜索和人工确认主体。确认后会绑定用户选中的信用代码、递增主体代次并创建查询任务句柄；分类详情任务执行和模型服务尚未实现。
 
-首批50个契约用例经用户确认后开始逐函数实现；补充HTTP、Cookie会话、搜索服务和天眼查适配器用例后，当前80通过、1项因主体确认仍为占位而失败。明细见[验收场景](tests/test-cases.md)。当前会话、搜索结果和幂等记录只保存在单进程内存中，重启会丢失，持久化、自动清理和多实例一致性尚未完成。
+首批50个契约用例经用户确认后开始逐函数实现；补充HTTP、Cookie会话、搜索、人工确认和天眼查适配器用例后，当前88项全部通过。明细见[验收场景](tests/test-cases.md)。当前会话、搜索结果、任务句柄和幂等记录只保存在单进程内存中，重启会丢失，持久化、自动清理和多实例一致性尚未完成。
 
 天眼查接入采用官方 MCP Shared Core，不使用旧版搜索 URL。把 `.env.example` 复制为 `.env`，在 `TYC_AUTHORIZATION` 中填写天眼 AI 页面生成的 MCP API Key。`.env` 已被 Git 忽略，密钥不得写入前端、日志、测试或提交记录。
 
@@ -60,7 +60,7 @@ uv sync --locked
 uv run uvicorn backend.app:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-接口文档：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)。当前可查看13个HTTP接口契约；`POST /api/v1/sessions`、会话恢复/续期/结束和 `POST /api/v1/sessions/{sid}/search` 已可调用。搜索要求服务端 `.env` 配置有效的 `TYC_AUTHORIZATION`，前端不得持有该密钥。其余业务路由仍是占位，调用会收到脱敏500错误包。
+接口文档：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)。当前可查看13个HTTP接口契约；`POST /api/v1/sessions`、会话恢复/续期/结束、候选搜索和 `POST /api/v1/sessions/{sid}/confirm` 已可调用。搜索要求服务端 `.env` 配置有效的 `TYC_AUTHORIZATION`，前端不得持有该密钥。确认接口只建立当前主体和排队中的查询任务；详情分类尚不会执行。其余业务路由仍是占位，调用会收到脱敏500错误包。
 
 ## 开发检查
 
@@ -77,4 +77,4 @@ npm --prefix frontend run build
 
 `contracts/` 中两个 JSON Schema 是字段定义的权威来源；生成类型由 `uv run python scripts/generate_contracts.py` 更新，不手改 `generated.py` 或 `generated.ts`。共享行为语义见 [global_schema.md](specs/common/global_schema.md)。
 
-上述命令检查契约结构与类型，不能证明全流程可用。契约测试单独执行：`uv run python -X utf8 -m pytest -q --tb=line`，目前预期返回非零退出码（主体确认占位导致1项失败）。天眼查搜索适配器可单独验证：`uv run pytest -q tests/contracts/test_tianyan_mcp_adapter.py`，当前10项通过；它使用假 HTTP 传输，不消耗真实查询额度。会话和搜索 HTTP 切片可运行：`uv run pytest -q tests/contracts/test_session_http.py tests/contracts/test_search_service.py tests/contracts/test_search_http.py`，当前12项通过。
+上述命令检查契约结构与类型，不能证明全流程可用。契约测试单独执行：`uv run python -X utf8 -m pytest -q --tb=line`，当前88项通过。天眼查搜索适配器可单独验证：`uv run pytest -q tests/contracts/test_tianyan_mcp_adapter.py`，当前10项通过；它使用假 HTTP 传输，不消耗真实查询额度。会话、搜索和确认切片可运行：`uv run pytest -q tests/contracts/test_session_http.py tests/contracts/test_search_service.py tests/contracts/test_search_http.py tests/contracts/test_confirm_service.py tests/contracts/test_confirm_http.py`，当前19项通过。

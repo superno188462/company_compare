@@ -1,4 +1,4 @@
-"""BE-IF-01：HTTP 路由；会话与候选搜索已接入应用服务，其余能力仍为占位。"""
+"""BE-IF-01：HTTP 路由；会话、候选搜索与人工确认已接入应用服务。"""
 
 from typing import Annotated
 from uuid import UUID
@@ -75,9 +75,12 @@ def search_companies(
 
 
 @router.post("/sessions/{sid}/confirm", response_model=OperationHandle, status_code=202, summary="确认用户选定的主体", description="明确选择后才启动资料查询的长任务。")
-def confirm_subject(sid: UUID, command: ConfirmSubjectCommand, actor: TrustedActor, key: IdempotencyKey) -> OperationHandle:
-    """BE-IF-03：主体确认占位。"""
-    raise NotImplementedError()
+def confirm_subject(
+    sid: UUID, command: ConfirmSubjectCommand, actor: TrustedActor,
+    key: IdempotencyKey, service: SearchService,
+) -> OperationHandle:
+    """BE-IF-03：绑定用户明确选择的候选并建立查询任务句柄。"""
+    return service.confirm(actor, sid, command, key)
 
 
 @router.put("/sessions/{sid}/draft", response_model=ManualDraft, summary="保存待修改草稿", description="BE-IF-04：草稿保存不接纳证据、不触发LLM。")
