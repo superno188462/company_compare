@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "locale": "zh-CN",
   "app_name": "企业公开线索筛查",
   "hints": {
@@ -118,6 +118,7 @@
     "stop_waiting_body": "停止等待不保证服务端任务或费用已取消；稍后可查看实际处理状态。"
   },
   "validation": {
+    "input_invalid": "输入格式不正确，请核对后重试。",
     "company_name_required": "请输入公司名称。",
     "company_name_length": "公司名称最多200个字符。",
     "credit_code_format": "请填写18位大写统一社会信用代码。",

@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 标识 / 文档版本 | SDD-FE-WORKSPACE / v1.2 |
+| 标识 / 文档版本 | SDD-FE-WORKSPACE / v1.3 |
 | 行为契约 | CONTRACT-1.0，SDD 已确认；骨架尚待评审 |
 | 基线 | [PRD-1.0](../common/prd.md)、[UI-1.0](../common/ui_notes.md) |
 | 后端/共享定义 | [后端 SDD](../backend/screening.spec.md)、[共享契约](../common/global_schema.md) |
@@ -17,6 +17,7 @@
 | 2026-10-22 | v1.0 | 确认 CONTRACT-1.0，进入骨架阶段 | 用户明确回复“好先生成骨架吧” |
 | 2026-10-22 | v1.1 | 追加类型/组件 Props 骨架及严格类型检查记录，行为契约不变 | 骨架待用户评审，见 skeleton-review.md |
 | 2026-10-22 | v1.2 | 按用户指定采用 React + TypeScript + Vite，增加可启动的初始外壳；CONTRACT-1.0 不变 | 用户要求“前端请使用reacet，帮我重构一下”；本次不代表业务测试或实现获批 |
+| 2026-10-23 | v1.3 | 引用用户确认的TEXT-1.1通用字段错误键input_invalid | 用户明确选择“新增通用提示（推荐）”；ValidationMessageKey继续从字典推导，React构建通过，业务交互尚未接通 |
 
 ## 2. 目标与范围
 

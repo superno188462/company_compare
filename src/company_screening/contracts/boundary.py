@@ -29,6 +29,7 @@ ErrorCode = Literal[
     "INPUT_TOO_LARGE", "STORAGE_UNAVAILABLE", "INTERNAL_ERROR",
 ]
 ValidationMessageKey = Literal[
+    "input_invalid",
     "company_name_required", "company_name_length", "credit_code_format", "content_required",
     "content_length", "url_format", "future_time", "time_format", "share_fields_required",
     "snapshot_ack_required", "no_candidate_code", "evidence_limit", "draft_saved", "clipboard_failed",

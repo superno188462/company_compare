@@ -25,6 +25,11 @@ IMPLEMENTED = {
     ("src/company_screening/services.py", "SessionService.create"),
     ("src/company_screening/services.py", "SessionService.restore"),
     ("src/company_screening/services.py", "SessionService.reset"),
+    ("backend/app.py", "create_app"),
+    ("backend/error_handlers.py", "validation_error"),
+    ("backend/error_handlers.py", "application_error"),
+    ("backend/error_handlers.py", "internal_error"),
+    ("backend/error_handlers.py", "sanitize_unhandled"),
 }
 
 SERVICE_PARAMETERS = {
@@ -160,7 +165,7 @@ def main() -> None:
     assert {item.value for item in generated.HintCode} == set(dictionary["hints"])
     for module in ("company_screening.contracts.boundary", "company_screening.services", "company_screening.ports", "company_screening.errors", "backend.app", "backend.dependencies", "backend.routes"):
         importlib.import_module(module)
-    print(f"Contract structure OK: {len(IMPLEMENTED)} implemented methods; {count} NotImplementedError functions; 13 service signatures; 3 port signatures; 13 routes; shared model/Schema round-trips and dictionary keys.")
+    print(f"Contract structure OK: {len(IMPLEMENTED)} implemented functions/methods; {count} NotImplementedError functions; 13 service signatures; 3 port signatures; 13 routes; shared model/Schema round-trips and dictionary keys.")
     print("Implementation behavior requires pytest; real providers, LLM and full browser integration remain unverified.")
 
 
