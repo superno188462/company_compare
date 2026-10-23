@@ -62,6 +62,7 @@ def _search_context(
         session_service=sessions,
         company_data=ConfirmFakeCompanyData(candidates or [_candidate()]),
         clock=clock,
+        task_submitter=lambda task: None,
     )
     result = service.search(actor, workspace.session_id, SearchCommand(query="测试企业"), uuid4())
     return actor, sessions, service, clock, workspace, result

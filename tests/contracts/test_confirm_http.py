@@ -34,7 +34,11 @@ class ConfirmHttpCompanyData:
 def test_confirm_http_updates_workspace_only_after_explicit_request() -> None:
     """BE-IF-01/03：同一Cookie明确确认后，恢复视图才出现主体。"""
     sessions = SessionService()
-    screening = ScreeningService(session_service=sessions, company_data=ConfirmHttpCompanyData())
+    screening = ScreeningService(
+        session_service=sessions,
+        company_data=ConfirmHttpCompanyData(),
+        task_submitter=lambda task: None,
+    )
     app = create_app(screening_service=screening, session_service=sessions)
 
     with TestClient(app) as client:

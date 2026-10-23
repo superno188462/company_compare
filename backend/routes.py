@@ -1,4 +1,4 @@
-"""BE-IF-01：HTTP 路由；会话、候选搜索与人工确认已接入应用服务。"""
+"""BE-IF-01：HTTP 路由；会话、候选搜索、人工确认与任务轮询已接入应用服务。"""
 
 from typing import Annotated
 from uuid import UUID
@@ -114,9 +114,11 @@ def retry_queries(sid: UUID, command: RetryQueryCommand, actor: TrustedActor, ke
 
 
 @router.get("/sessions/{sid}/operations/{opid}", response_model=OperationView, summary="查看操作状态", description="只读进度或完整终态，不续期、不返回半段报告。")
-def get_operation(sid: UUID, opid: UUID, actor: TrustedActor) -> OperationView:
-    """BE-IF-06：任务状态读取占位。"""
-    raise NotImplementedError()
+def get_operation(
+    sid: UUID, opid: UUID, actor: TrustedActor, service: SearchService,
+) -> OperationView:
+    """BE-IF-06：只读返回当前任务状态，任务ID不作为访问凭据。"""
+    return service.operation(actor, sid, opid)
 
 
 @router.post("/shares/{receipt_id}/withdraw", response_model=WithdrawalResult, summary="撤回自己的共享", description="验证提交者所有权，重复撤回幂等；回执本身不是授权凭据。")

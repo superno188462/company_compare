@@ -1,7 +1,9 @@
-"""BE-IF-02：应用服务；会话、候选搜索与人工确认已实现。"""
+"""BE-IF-02：应用服务；会话、搜索、确认、分类查询编排与任务轮询已实现。"""
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+import hashlib
 from threading import RLock
 from typing import ClassVar
 from uuid import UUID, uuid4
@@ -12,8 +14,17 @@ from .contracts.boundary import (
     SessionExpiry, SubmitEvidenceCommand, WithdrawalResult, WorkspaceState,
 )
 from .errors import ApplicationError, ProviderError
-from .contracts.generated import HintCode, NullableText, Subject
+from .contracts.generated import Category, HintCode, NullableText, Subject, WorkflowPayload
 from .ports import CompanyDataPort
+
+
+CATEGORY_ERROR_SCOPE = {
+    "basic": "工商登记、股东及出资计划查询未完整完成",
+    "abnormal": "经营异常计划查询未完整完成",
+    "penalty": "行政处罚计划查询未完整完成",
+    "judicial": "失信、被执行、限高、司法案件、裁判文书及法院公告计划查询未完整完成",
+    "asset": "股权冻结、司法协助、动产抵押及土地抵押计划查询未完整完成",
+}
 
 
 class SessionService:
@@ -135,6 +146,32 @@ class SessionService:
             self._sessions[sid] = (actor.actor_id, updated)
             return handle
 
+    def _complete_operation(
+        self,
+        actor: ActorContext,
+        handle: OperationHandle,
+        payload: WorkflowPayload,
+    ) -> bool:
+        """仅当会话、代次和活动任务仍匹配时写入完整终态。"""
+        with self._lock:
+            try:
+                self.restore(actor, handle.session_id)
+            except ApplicationError:
+                return False
+            entry = self._sessions.get(handle.session_id)
+            if entry is None or entry[0] != actor.actor_id:
+                return False
+            state = entry[1]
+            if (
+                state.session_generation != handle.session_generation
+                or state.active_operation is None
+                or state.active_operation.operation_id != handle.operation_id
+            ):
+                return False
+            updated = state.model_copy(update={"payload": payload, "active_operation": None})
+            self._sessions[handle.session_id] = (actor.actor_id, updated)
+            return True
+
 
 class ScreeningService:
     """搜索、证据提交和受控报告工作流边界。"""
@@ -142,7 +179,12 @@ class ScreeningService:
     _searches: ClassVar[dict[UUID, tuple[UUID, UUID, datetime, SearchResult]]] = {}
     _idempotency: ClassVar[dict[tuple[UUID, UUID, UUID], tuple[str, SearchResult]]] = {}
     _confirm_idempotency: ClassVar[dict[tuple[UUID, UUID, UUID], tuple[str, OperationHandle]]] = {}
+    _operations: ClassVar[dict[UUID, tuple[UUID, UUID, int, OperationView]]] = {}
     _lock: ClassVar[RLock] = RLock()
+    _query_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(
+        max_workers=4,
+        thread_name_prefix="company-screening-query",
+    )
 
     def __init__(
         self,
@@ -150,11 +192,13 @@ class ScreeningService:
         session_service: SessionService | None = None,
         company_data: CompanyDataPort | None = None,
         clock: Callable[[], datetime] | None = None,
+        task_submitter: Callable[[Callable[[], None]], object] | None = None,
     ) -> None:
         """注入会话和提供方端口；缺少真实端口时不使用合成数据兜底。"""
         self._session_service = session_service or SessionService()
         self._company_data = company_data
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._task_submitter = task_submitter or self._query_executor.submit
 
     def search(self, actor: ActorContext, sid: UUID, command: SearchCommand, key: UUID) -> SearchResult:
         """BE-IF-03：仅返回候选，不自动确认。"""
@@ -283,8 +327,247 @@ class ScreeningService:
                 command.discard_draft,
                 uuid4(),
             )
+            self._operations[handle.operation_id] = (
+                actor.actor_id,
+                sid,
+                handle.session_generation,
+                OperationView(
+                    **handle.model_dump(),
+                    state="queued",
+                    phase="query",
+                    result=None,
+                    error=None,
+                ),
+            )
             self._confirm_idempotency[idempotency_key] = (fingerprint, handle.model_copy(deep=True))
-            return handle
+
+        try:
+            self._task_submitter(
+                lambda: self._run_query_operation(actor, handle, subject)
+            )
+        except Exception:
+            self._fail_operation(
+                handle.operation_id,
+                ErrorInfo(code="INTERNAL_ERROR", hint_id=HintCode.INTERNAL_ERROR,
+                          fields=[], retryable=False),
+            )
+        return handle
+
+    def _fail_operation(self, opid: UUID, info: ErrorInfo) -> None:
+        """把无法可靠形成完整结果的任务收敛为脱敏失败终态。"""
+        with self._lock:
+            stored = self._operations.get(opid)
+            if stored is None:
+                return
+            failed = stored[3].model_copy(update={
+                "state": "failed",
+                "phase": "complete",
+                "result": None,
+                "error": info,
+            }, deep=True)
+            self._operations[opid] = (stored[0], stored[1], stored[2], failed)
+
+    def _run_query_operation(
+        self,
+        actor: ActorContext,
+        handle: OperationHandle,
+        subject: Subject,
+    ) -> None:
+        """在后台串行执行固定五类查询并写入完整终态。"""
+        with self._lock:
+            stored = self._operations.get(handle.operation_id)
+            if stored is None:
+                return
+            running = stored[3].model_copy(update={"state": "running", "phase": "query"}, deep=True)
+            self._operations[handle.operation_id] = (stored[0], stored[1], stored[2], running)
+        try:
+            payload = self._execute_query_operation(actor, handle, subject)
+            if not self._session_service._complete_operation(actor, handle, payload):
+                info = ErrorInfo(code="OPERATION_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT,
+                                 fields=[], retryable=False)
+                self._fail_operation(handle.operation_id, info)
+                return
+        except ApplicationError as exc:
+            self._fail_operation(handle.operation_id, exc.info)
+            return
+        except Exception:
+            info = ErrorInfo(code="INTERNAL_ERROR", hint_id=HintCode.INTERNAL_ERROR,
+                             fields=[], retryable=False)
+            self._fail_operation(handle.operation_id, info)
+            return
+
+        with self._lock:
+            stored = self._operations.get(handle.operation_id)
+            if stored is None:
+                return
+            succeeded = stored[3].model_copy(update={
+                "state": "succeeded",
+                "phase": "complete",
+                "result": payload,
+                "error": None,
+            }, deep=True)
+            self._operations[handle.operation_id] = (stored[0], stored[1], stored[2], succeeded)
+
+    def _execute_query_operation(
+        self,
+        actor: ActorContext,
+        handle: OperationHandle,
+        subject: Subject,
+    ) -> WorkflowPayload:
+        """执行固定查询计划；类别失败只进入覆盖状态，不伪装成空结果。"""
+        workspace = self._session_service.restore(actor, handle.session_id)
+        if (
+            workspace.session_generation != handle.session_generation
+            or workspace.current_subject != subject
+            or workspace.active_operation is None
+            or workspace.active_operation.operation_id != handle.operation_id
+        ):
+            info = ErrorInfo(code="OPERATION_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT,
+                             fields=[], retryable=False)
+            error = ApplicationError(info.code)
+            error.info = info
+            raise error
+
+        category_results: dict[str, dict[str, object]] = {}
+        evidence_rows: list[dict[str, object]] = []
+        expected_credit = subject.credit_code.root
+        for category in Category:
+            attempted_at = self._clock()
+            if self._company_data is None:
+                category_results[category.value] = {
+                    "status": "error",
+                    "record_count": 0,
+                    "queried_at": attempted_at,
+                    "scope_description": CATEGORY_ERROR_SCOPE[category.value],
+                    "error_code": "UPSTREAM_AUTH",
+                }
+                continue
+            try:
+                batch = self._company_data.fetch_category(subject, category)
+                if batch.category != category:
+                    raise ValueError("category mismatch")
+                if batch.binding_credit_code != expected_credit:
+                    category_results[category.value] = {
+                        "status": "error",
+                        "record_count": 0,
+                        "queried_at": batch.queried_at,
+                        "scope_description": CATEGORY_ERROR_SCOPE[category.value],
+                        "error_code": "SUBJECT_RESPONSE_MISMATCH",
+                    }
+                    continue
+                if any(record.record_credit_code not in (None, expected_credit) for record in batch.records):
+                    category_results[category.value] = {
+                        "status": "error",
+                        "record_count": 0,
+                        "queried_at": batch.queried_at,
+                        "scope_description": CATEGORY_ERROR_SCOPE[category.value],
+                        "error_code": "SUBJECT_RESPONSE_MISMATCH",
+                    }
+                    continue
+                record_ids = [record.record_id for record in batch.records]
+                if len(record_ids) != len(set(record_ids)) or len(evidence_rows) + len(batch.records) > 200:
+                    category_results[category.value] = {
+                        "status": "error",
+                        "record_count": 0,
+                        "queried_at": batch.queried_at,
+                        "scope_description": CATEGORY_ERROR_SCOPE[category.value],
+                        "error_code": "UPSTREAM_INCOMPLETE",
+                    }
+                    continue
+
+                category_evidence: list[dict[str, object]] = []
+                for record in batch.records:
+                    digest = hashlib.sha256(
+                        f"{category.value}:{record.record_id}".encode("utf-8")
+                    ).hexdigest()[:20].upper()
+                    category_evidence.append({
+                        "evidence_id": f"E-TY-{category.value.upper()}-{digest}",
+                        "subject_credit_code": expected_credit,
+                        "category": category.value,
+                        "content": record.content,
+                        "source": "tianyan",
+                        "snapshot_time": batch.queried_at,
+                        "captured_at": self._clock(),
+                        "event_time": record.event_time,
+                        "source_url": record.source_url,
+                        "source_publisher": record.source_publisher,
+                        "provider_record_id": record.record_id,
+                        "origin_id": f"tyc:{category.value}:{digest.lower()}",
+                        "derived_from": None,
+                        "verification_status": "original_not_verified",
+                        "hint_id": "SOURCE_TIANYAN",
+                    })
+                evidence_rows.extend(category_evidence)
+                category_results[category.value] = {
+                    "status": "ok" if batch.records else "empty",
+                    "record_count": len(batch.records),
+                    "queried_at": batch.queried_at,
+                    "scope_description": batch.scope_description,
+                    "error_code": None,
+                }
+            except ProviderError as exc:
+                category_results[category.value] = {
+                    "status": "error",
+                    "record_count": 0,
+                    "queried_at": attempted_at,
+                    "scope_description": CATEGORY_ERROR_SCOPE[category.value],
+                    "error_code": exc.code,
+                }
+            except Exception:
+                category_results[category.value] = {
+                    "status": "error",
+                    "record_count": 0,
+                    "queried_at": attempted_at,
+                    "scope_description": CATEGORY_ERROR_SCOPE[category.value],
+                    "error_code": "UPSTREAM_INVALID",
+                }
+
+        statuses = [str(category_results[category.value]["status"]) for category in Category]
+        if all(status == "error" for status in statuses):
+            tianyan_status = "error"
+        elif any(status == "error" for status in statuses):
+            tianyan_status = "partial"
+        elif any(status == "ok" for status in statuses):
+            tianyan_status = "ok"
+        else:
+            tianyan_status = "empty"
+
+        hints = [HintCode.DISCLOSURE_LIMITED]
+        if evidence_rows:
+            hints.extend([HintCode.SOURCE_TIANYAN, HintCode.REPORT_FAILED])
+            llm_status = "error"
+        else:
+            hints.append(HintCode.NO_EVIDENCE)
+            llm_status = "skipped_no_evidence"
+        if tianyan_status == "partial":
+            hints.append(HintCode.PARTIAL_COVERAGE)
+        elif tianyan_status == "error":
+            hints.append(HintCode.QUERY_ERROR)
+        elif tianyan_status == "empty":
+            hints.append(HintCode.QUERY_EMPTY)
+
+        return WorkflowPayload.model_validate({
+            "subject": subject,
+            "evidence_list": evidence_rows,
+            "summary_text": "",
+            "api_status": {
+                "tianyan_status": tianyan_status,
+                "planned_categories": [category.value for category in Category],
+                "categories": category_results,
+                "session_id": handle.session_id,
+                "session_generation": handle.session_generation,
+                "operation_id": handle.operation_id,
+                "result_revision": 1,
+                "evidence_version": 1,
+                "summary_evidence_version": None,
+                "summary_generated_at": None,
+                "llm_status": llm_status,
+                "snapshot_status": "not_checked",
+                "snapshot_draft": None,
+                "last_submission": None,
+            },
+            "ui_hint_group": hints,
+        })
 
     def save_draft(self, actor: ActorContext, sid: UUID, draft: EditableDraft, key: UUID) -> ManualDraft:
         """BE-IF-04：保存草稿，不接纳证据或调用模型。"""
@@ -308,7 +591,16 @@ class ScreeningService:
 
     def operation(self, actor: ActorContext, sid: UUID, opid: UUID) -> OperationView:
         """BE-IF-06：只读进度或完整终态，不续期。"""
-        raise NotImplementedError()
+        self._session_service.restore(actor, sid)
+        with self._lock:
+            stored = self._operations.get(opid)
+            if stored is not None and stored[0] == actor.actor_id and stored[1] == sid:
+                return stored[3].model_copy(deep=True)
+        info = ErrorInfo(code="RESOURCE_NOT_FOUND", hint_id=HintCode.INTERNAL_ERROR,
+                         fields=[], retryable=False)
+        error = ApplicationError(info.code)
+        error.info = info
+        raise error
 
 
 class ShareService:
