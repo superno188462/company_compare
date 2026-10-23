@@ -24,6 +24,10 @@ strict = true
 files = ["src/company_screening", "backend"]
 plugins = ["pydantic.mypy"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests/contracts"]
+addopts = "-ra"
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true
@@ -32,6 +36,8 @@ warn_required_dynamic_aliases = true
 [dependency-groups]
 dev = [
     "datamodel-code-generator>=0.86.0",
+    "httpx>=0.28.1",
     "jsonschema[format]>=4.26.0",
     "mypy>=2.4.0",
+    "pytest>=9.1.1",
 ]

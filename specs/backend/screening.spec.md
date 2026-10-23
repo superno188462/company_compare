@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 标识 / 文档版本 | SDD-BE-SCREENING / v1.1 |
+| 标识 / 文档版本 | SDD-BE-SCREENING / v1.2 |
 | 行为契约 | CONTRACT-1.0，SDD 已确认；骨架尚待评审 |
 | PRD / UI 基线 | [PRD-1.0](../common/prd.md)、[UI-1.0](../common/ui_notes.md) |
 | 共享定义 | [global_schema.md](../common/global_schema.md)、[输入 Schema](../../contracts/input-schema.json)、[输出 Schema](../../contracts/output-schema.json) |
@@ -16,6 +16,7 @@
 | 2026-10-22 | v0.1 | 基于已确认需求定义服务能力、状态、模型、错误与验收 | AI 自查不等于开发者批准；本版待评审 |
 | 2026-10-22 | v1.0 | 确认 CONTRACT-1.0，进入骨架阶段 | 用户明确回复“好先生成骨架吧” |
 | 2026-10-22 | v1.1 | 追加骨架映射与导入/类型检查记录，行为契约不变 | 骨架结构检查通过；骨架本身待用户评审，见 skeleton-review.md |
+| 2026-10-23 | v1.2 | 追加首批50个可执行契约用例与实际结果，CONTRACT-1.0不变 | 用户回复“可以继续吧”授权继续准备测试；42通过/8占位失败，测试待评审，见 tests/test-cases.md |
 
 ## 2. 目标与范围
 
@@ -225,7 +226,7 @@
 
 ## 9. 验收与追踪
 
-测试规划见 [test-cases.md](../../tests/test-cases.md)，均为待编写/待执行，不代表骨架或契约测试阶段已通过。
+测试规划及首批可执行用例结果见 [test-cases.md](../../tests/test-cases.md)。当前42项通过、8项因占位失败；其余行为、Mock提供方流程和集成专项仍待补齐，不代表整个契约测试阶段已通过。
 
 | 条款 | 验收条目 / 计划用例 | 验证归属 |
 | --- | --- | --- |

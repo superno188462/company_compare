@@ -14,7 +14,7 @@
 
 **前端采用 React + TypeScript + Vite，已能启动工作台外壳。** 页面提供布局预览与官网外链；搜索、证据处理和报告生成尚未接入。Python 业务函数仍为 `raise NotImplementedError()`，真实天眼查和模型服务尚未接入。
 
-下一步围绕这条主线准备契约测试，再用模拟企业数据和模拟报告服务打通页面与后端。随后接入真实服务，补齐共享快照、会话期限和异常恢复等已约定能力。模拟数据页面需要明确标注演示数据。
+已准备首批50个契约用例：42项结构与模型检查通过，8项因应用入口/服务尚未实现而失败。测试待评审，覆盖明细见[验收场景](tests/test-cases.md)。后续按主线用模拟企业数据和模拟报告服务打通页面与后端，再接入真实服务。模拟数据页面需要明确标注演示数据。
 
 ## 文件怎么找
 
@@ -66,4 +66,4 @@ npm --prefix frontend run build
 
 `contracts/` 中两个 JSON Schema 是字段定义的权威来源；生成类型由 `uv run python scripts/generate_contracts.py` 更新，不手改 `generated.py` 或 `generated.ts`。共享行为语义见 [global_schema.md](specs/common/global_schema.md)。
 
-上述命令检查骨架与类型，不能证明业务功能可用。正式契约测试尚未编写；当前骨架仍待评审。
+上述命令检查骨架与类型，不能证明业务功能可用。首批契约测试单独执行：`uv run python -X utf8 -m pytest -q --tb=line`，目前预期返回非零退出码（业务占位导致8项失败）。具体结果与未覆盖范围见验收场景；当前测试未获评审锁定。
