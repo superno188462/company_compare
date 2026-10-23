@@ -1,24 +1,57 @@
-"""BE-IF-02：应用服务骨架；所有业务方法尚未实现。"""
+"""BE-IF-02：应用服务；会话逐步实现，其余方法仍为占位。"""
 
-from uuid import UUID
+from datetime import datetime, timedelta, timezone
+from threading import RLock
+from typing import ClassVar
+from uuid import UUID, uuid4
 
 from .contracts.boundary import (
     ActorContext, ConfirmSubjectCommand, EditableDraft, ManualDraft, OperationHandle,
-    OperationView, RetryAnalysisCommand, RetryQueryCommand, SearchCommand, SearchResult,
+    ErrorInfo, OperationView, RetryAnalysisCommand, RetryQueryCommand, SearchCommand, SearchResult,
     SessionExpiry, SubmitEvidenceCommand, WithdrawalResult, WorkspaceState,
 )
+from .errors import ApplicationError
+from .contracts.generated import HintCode
 
 
 class SessionService:
-    """会话创建、恢复、续期和结束边界；不在此阶段实现权限或存储。"""
+    """会话边界；首个开发切片使用进程内存，尚不具备重启持久化能力。"""
+
+    _sessions: ClassVar[dict[UUID, tuple[UUID, WorkspaceState]]] = {}
+    _ended: ClassVar[dict[UUID, UUID]] = {}
+    _lock: ClassVar[RLock] = RLock()
 
     def create(self, actor: ActorContext) -> WorkspaceState:
         """BE-IF-01 / DATA-05：显式创建私有会话。"""
-        raise NotImplementedError()
+        state = WorkspaceState(
+            session_id=uuid4(), expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            session_generation=0, current_subject=None, payload=None, draft=None,
+            active_operation=None, share_receipts=[],
+        )
+        with self._lock:
+            self._sessions[state.session_id] = (actor.actor_id, state.model_copy(deep=True))
+        return state
 
     def restore(self, actor: ActorContext, sid: UUID) -> WorkspaceState:
         """BE-IF-01 / DATA-05：恢复状态；读取不续期。"""
-        raise NotImplementedError()
+        with self._lock:
+            entry = self._sessions.get(sid)
+            if entry is not None and entry[0] == actor.actor_id:
+                state = entry[1]
+                if datetime.now(timezone.utc) < state.expires_at:
+                    # 返回独立副本，调用者不能绕过服务修改已保存状态。
+                    return state.model_copy(deep=True)
+                del self._sessions[sid]
+                self._ended[sid] = actor.actor_id
+            if self._ended.get(sid) == actor.actor_id:
+                info = ErrorInfo(code="SESSION_EXPIRED", hint_id=HintCode.SESSION_EXPIRED,
+                                 fields=[], retryable=False)
+            else:
+                info = ErrorInfo(code="RESOURCE_NOT_FOUND", hint_id=HintCode.INTERNAL_ERROR,
+                                 fields=[], retryable=False)
+            error = ApplicationError(info.code)
+            error.info = info
+            raise error
 
     def activity(self, actor: ActorContext, sid: UUID) -> SessionExpiry:
         """BE-NFR-02：只为明确用户活动续期。"""
@@ -26,7 +59,13 @@ class SessionService:
 
     def reset(self, actor: ActorContext, sid: UUID, key: UUID) -> None:
         """DATA-05：结束当前会话，使迟到写回失效。"""
-        raise NotImplementedError()
+        with self._lock:
+            # 重复结束本人会话保持幂等；结束标记不含正文、草稿或报告。
+            if self._ended.get(sid) == actor.actor_id:
+                return
+            self.restore(actor, sid)
+            del self._sessions[sid]
+            self._ended[sid] = actor.actor_id
 
 
 class ScreeningService:

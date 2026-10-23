@@ -20,6 +20,13 @@ from company_screening.contracts.boundary import ValidationMessageKey
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# 用户2026-10-23确认首批测试后，逐函数实现并验证的明确范围。
+IMPLEMENTED = {
+    ("src/company_screening/services.py", "SessionService.create"),
+    ("src/company_screening/services.py", "SessionService.restore"),
+    ("src/company_screening/services.py", "SessionService.reset"),
+}
+
 SERVICE_PARAMETERS = {
     "SessionService.create": ["self", "actor"],
     "SessionService.restore": ["self", "actor", "sid"],
@@ -55,13 +62,22 @@ EXPECTED_ROUTES = {
 
 
 def check_stub_bodies() -> int:
-    """应用函数只能保留文档字符串和无参数 NotImplementedError。"""
+    """已实现清单之外的函数继续强制占位；不放宽公共签名检查。"""
     count = 0
+    seen = set()
     for directory in (ROOT / "src", ROOT / "backend"):
         for path in directory.rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"))
+            qualified = {id(method): f"{cls.name}.{method.name}" for cls in ast.walk(tree)
+                         if isinstance(cls, ast.ClassDef) for method in cls.body
+                         if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))}
             for node in ast.walk(tree):
                 if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                identity = (path.relative_to(ROOT).as_posix(), qualified.get(id(node), node.name))
+                if identity in IMPLEMENTED:
+                    assert node.returns is not None, identity
+                    seen.add(identity)
                     continue
                 body = node.body
                 if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
@@ -72,6 +88,7 @@ def check_stub_bodies() -> int:
                 assert error.func.id == "NotImplementedError" and not error.args and not error.keywords, (path, node.name)
                 assert node.returns is not None, (path, node.name)
                 count += 1
+    assert seen == IMPLEMENTED, (seen, IMPLEMENTED)
     return count
 
 
@@ -143,8 +160,8 @@ def main() -> None:
     assert {item.value for item in generated.HintCode} == set(dictionary["hints"])
     for module in ("company_screening.contracts.boundary", "company_screening.services", "company_screening.ports", "company_screening.errors", "backend.app", "backend.dependencies", "backend.routes"):
         importlib.import_module(module)
-    print(f"Skeleton OK: {count} NotImplementedError functions; 13 service signatures; 3 port signatures; 13 routes; shared model/Schema round-trips and dictionary keys.")
-    print("Business behavior, real providers, LLM and browser integration remain unimplemented/unverified.")
+    print(f"Contract structure OK: {len(IMPLEMENTED)} implemented methods; {count} NotImplementedError functions; 13 service signatures; 3 port signatures; 13 routes; shared model/Schema round-trips and dictionary keys.")
+    print("Implementation behavior requires pytest; real providers, LLM and full browser integration remain unverified.")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # 骨架映射与评审记录
 
-日期：2026-10-22；行为基线：CONTRACT-1.0；骨架状态：结构自查完成，待开发者评审。
+日期：2026-10-23；行为基线：CONTRACT-1.0；当前状态：首批测试已确认，会话服务逐函数实现中。
 
 用户明确回复“好先生成骨架吧”，授权从已交付 SDD 进入骨架阶段，随后提供目标 GitHub 仓库并要求提交。本记录不将提交 GitHub 视为骨架或契约测试已获评审通过。
 
@@ -25,7 +25,7 @@
 
 ## 本阶段实现边界
 
-- `src/` 与 `backend/` 内的31个函数/方法，除 docstring 外均只有 `raise NotImplementedError()`。
+- `src/` 与 `backend/` 内原31个函数/方法中，会话create/restore/reset已实现，其余28个继续保留 `raise NotImplementedError()`；检查工具按明确的3个方法清单区分实现与占位，公共签名检查保持不变。
 - Pydantic 只声明类型、必填、长度、枚举、模式与基础模型配置，没有自定义业务校验器、数据库、模型客户端或网络请求。
 - 前端已按用户指定采用 React + TypeScript + Vite，可预览初始外壳与固定官网新标签页链接；既有组件 Props 绑定到 React 类型，业务状态、fetch、自动确认、共享和复制仍未实现。页面没有企业数据，搜索禁用。
 - 开发工具 `scripts/generate_contracts.py` 和 `scripts/check_skeleton.py` 包含离线生成/检查逻辑，不是应用业务逻辑。
@@ -42,7 +42,7 @@ JSON Schema 为权威，Pydantic/TS 是声明投影。生成工具展开原有�
 | 检查 | 实际结果 |
 | --- | --- |
 | `uv run mypy` | 严格模式通过，12个应用/后端源文件 |
-| `uv run python scripts/check_skeleton.py` | 31个未实现函数、13个服务签名、3个端口签名、13个路由、模型字段/必填性及 Schema 往返检查通过 |
+| `uv run python scripts/check_skeleton.py` | 3个已实现方法、28个占位、13个服务签名、3个端口签名、13个路由、模型字段/必填性及 Schema 往返检查通过 |
 | `npm --prefix frontend run typecheck` | TypeScript / React TSX 严格检查通过，无 emit |
 | `npm --prefix frontend run build` | Vite 生产构建通过，生成 `frontend/dist/` |
 | React 外壳浏览器检查 | 本机 Chrome 无头模式检查开发服务及生产预览：1440px/360px 布局、无横向溢出、禁用搜索、3个安全官网外链与键盘跳转通过；无浏览器报错、无主动外部请求 |
@@ -58,4 +58,4 @@ React 工程调整：新增 `main.tsx` 挂载入口、`App.tsx` 初始外壳、�
 - 单候选人工确认、草稿/证据分离、共享准入和报告版本是否有对应声明。
 - 已准备的首批契约测试是否准确反映对应条款。
 
-开发者结论：首批测试待确认。测试准备基于用户2026-10-23回复“可以继续吧”；本记录不将尚未展示的测试追认为已批准。本阶段不自行填充业务实现。
+开发者结论：用户在首批测试交付后回复“继续，第一步是开发什么？”，确认该批并进入实现；原公共签名、Schema和测试代码未变。当前会话服务4项通过，整体46通过/4占位失败；其余未覆盖范围继续按测试流程推进。
