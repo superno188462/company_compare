@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 IMPLEMENTED = {
     ("src/company_screening/services.py", "SessionService.create"),
     ("src/company_screening/services.py", "SessionService.restore"),
+    ("src/company_screening/services.py", "SessionService.activity"),
     ("src/company_screening/services.py", "SessionService.reset"),
     ("backend/app.py", "create_app"),
     ("backend/error_handlers.py", "validation_error"),
@@ -33,6 +34,16 @@ IMPLEMENTED = {
     ("src/company_screening/adapters/tianyan_mcp.py", "_provider_error"),
     ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter.__init__"),
     ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter.search"),
+    ("src/company_screening/services.py", "ScreeningService.__init__"),
+    ("src/company_screening/services.py", "ScreeningService.search"),
+    ("backend/dependencies.py", "get_screening_service"),
+    ("backend/dependencies.py", "get_actor"),
+    ("backend/dependencies.py", "get_session_service"),
+    ("backend/routes.py", "search_companies"),
+    ("backend/routes.py", "create_session"),
+    ("backend/routes.py", "restore_session"),
+    ("backend/routes.py", "notify_activity"),
+    ("backend/routes.py", "reset_session"),
 }
 
 SERVICE_PARAMETERS = {
@@ -107,7 +118,7 @@ def check_signatures(relative: str, expected: dict[str, list[str]]) -> None:
     for cls in tree.body:
         if isinstance(cls, ast.ClassDef):
             for node in cls.body:
-                if isinstance(node, ast.FunctionDef):
+                if isinstance(node, ast.FunctionDef) and node.name != "__init__":
                     actual[f"{cls.name}.{node.name}"] = [arg.arg for arg in node.args.args]
     assert actual == expected, (relative, actual)
 

@@ -118,3 +118,13 @@
 真实集成最小验证包括一次 `/v1/core/auth/ready` 鉴权健康检查和一次官方 README 示例企业的两条候选搜索；两者均成功。真实结果仅用于确认字段结构，没有写入仓库测试夹具，也没有把 Key 输出到日志。该调用只能证明当时凭据与搜索工具可用，不能证明各详情类别已授权。
 
 新增 [test_tianyan_mcp_adapter.py](contracts/test_tianyan_mcp_adapter.py) 10项假传输测试，覆盖请求头与工具参数、空结果、页码游标、候选字段规范化、401/403/429/400错误映射、一次瞬时失败重试及非法响应拒绝，全部通过。全量当前为67通过、2项占位失败；严格类型检查15个源文件通过。`ScreeningService.search/confirm`、Cookie身份和HTTP业务路由仍未接通，因此前端当前还不能发起真实搜索。
+
+### 2026-10-23 会话与候选搜索 HTTP 垂直切片
+
+用户回复“继续”后，在不修改 CONTRACT-1.0、既有 Schema 和公共签名的前提下，新增并评审实现范围内的12个契约用例：`test_session_http.py` 3项、`test_search_service.py` 7项、`test_search_http.py` 2项。
+
+本切片实现签名匿名Cookie、会话创建幂等回放、恢复、明确活动续期、结束，以及 `ScreeningService.search` 与 `/sessions/{sid}/search`。搜索在调用提供方前校验会话归属；同键同请求回放结果，同键不同请求拒绝；单候选仍不自动确认；缺信用代码候选不可选；提供方错误只返回脱敏错误包。未配置服务端Key时返回明确上游鉴权错误，不使用合成企业数据兜底。
+
+当前全量为80通过、1失败。唯一失败是既有 `test_unknown_session_cannot_confirm_candidate`，原因是 `ScreeningService.confirm` 按阶段仍为 `NotImplementedError`；未跳过、改写或弱化该用例。`uv run mypy` 严格检查15个源文件通过，骨架结构检查为22个已实现函数/方法、20个占位。
+
+真实HTTP烟测通过同一客户端Cookie依次调用会话创建和官方MCP候选搜索，实际返回201、200、1个可选候选及搜索ID。烟测只输出结构状态，没有保存密钥或完整企业资料；它证明当前凭据和候选搜索链路当时可用，不代表详情类别、持久化或分析能力已完成。当前存储仍是单进程内存；同源写校验、持久化、多实例一致性和定时清理未在本切片实现。

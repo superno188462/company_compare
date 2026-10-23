@@ -1,9 +1,9 @@
-"""BE-IF-01：13个 HTTP 路由声明，处理函数统一保持未实现。"""
+"""BE-IF-01：HTTP 路由；会话与候选搜索已接入应用服务，其余能力仍为占位。"""
 
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 
 from company_screening.contracts.base import ContractModel
 from company_screening.contracts.boundary import (
@@ -11,12 +11,16 @@ from company_screening.contracts.boundary import (
     OperationView, RetryAnalysisCommand, RetryQueryCommand, SearchCommand, SearchResult,
     SessionExpiry, SubmitEvidenceCommand, WithdrawalResult, WorkspaceState,
 )
+from company_screening.errors import ApplicationError
+from company_screening.services import ScreeningService, SessionService
 
-from .dependencies import get_actor
+from .dependencies import get_actor, get_screening_service, get_session_service
 
 router = APIRouter(prefix="/api/v1", tags=["企业公开线索筛查"])
 TrustedActor = Annotated[ActorContext, Depends(get_actor)]
 IdempotencyKey = Annotated[UUID, Header(alias="Idempotency-Key", description="同次操作重试沿用原UUID，不能同键更改内容。")]
+SearchService = Annotated[ScreeningService, Depends(get_screening_service)]
+Sessions = Annotated[SessionService, Depends(get_session_service)]
 
 
 class EmptyBody(ContractModel):
@@ -24,33 +28,50 @@ class EmptyBody(ContractModel):
 
 
 @router.post("/sessions", response_model=WorkspaceState, status_code=201, summary="显式创建会话", description="BE-IF-01：建立私有工作台，不运行企业查询或分析。")
-def create_session(actor: TrustedActor, key: IdempotencyKey) -> WorkspaceState:
-    """创建会话边界；所有者及幂等处理尚未实现。"""
-    raise NotImplementedError()
+def create_session(
+    request: Request, actor: TrustedActor, key: IdempotencyKey, service: Sessions,
+) -> WorkspaceState:
+    """创建私有会话；同一所有者的同一键在有效期内回放原会话。"""
+    store = request.app.state.session_create_idempotency
+    lock = request.app.state.session_create_lock
+    identity = (actor.actor_id, key)
+    with lock:
+        existing = store.get(identity)
+        if existing is not None:
+            try:
+                return service.restore(actor, existing.session_id)
+            except ApplicationError:
+                del store[identity]
+        created = service.create(actor)
+        store[identity] = created.model_copy(deep=True)
+        return created
 
 
 @router.get("/sessions/{sid}", response_model=WorkspaceState, summary="恢复会话", description="读取不续期，只能恢复当前所有者的有效会话。")
-def restore_session(sid: UUID, actor: TrustedActor) -> WorkspaceState:
+def restore_session(sid: UUID, actor: TrustedActor, service: Sessions) -> WorkspaceState:
     """BE-IF-01 / DATA-05。"""
-    raise NotImplementedError()
+    return service.restore(actor, sid)
 
 
 @router.post("/sessions/{sid}/activity", response_model=SessionExpiry, summary="记录明确用户活动", description="后台轮询不能调用此能力为会话续期。")
-def notify_activity(sid: UUID, body: EmptyBody, actor: TrustedActor) -> SessionExpiry:
-    """BE-NFR-02：活动续期占位。"""
-    raise NotImplementedError()
+def notify_activity(sid: UUID, body: EmptyBody, actor: TrustedActor, service: Sessions) -> SessionExpiry:
+    """BE-NFR-02：只有此前端明确活动通知会续期。"""
+    return service.activity(actor, sid)
 
 
 @router.delete("/sessions/{sid}", status_code=204, response_model=None, summary="结束本次会话", description="清理私有状态并使迟到写回失效；不默认撤回已共享记录。")
-def reset_session(sid: UUID, actor: TrustedActor, key: IdempotencyKey) -> None:
-    """DATA-05：会话结束占位。"""
-    raise NotImplementedError()
+def reset_session(sid: UUID, actor: TrustedActor, key: IdempotencyKey, service: Sessions) -> None:
+    """DATA-05：结束当前所有者的会话，使迟到写回失效。"""
+    service.reset(actor, sid, key)
 
 
 @router.post("/sessions/{sid}/search", response_model=SearchResult, summary="搜索候选企业", description="BE-IF-03：单候选也不自动确认。")
-def search_companies(sid: UUID, command: SearchCommand, actor: TrustedActor, key: IdempotencyKey) -> SearchResult:
-    """只搜索候选；未实现。"""
-    raise NotImplementedError()
+def search_companies(
+    sid: UUID, command: SearchCommand, actor: TrustedActor,
+    key: IdempotencyKey, service: SearchService,
+) -> SearchResult:
+    """只搜索候选；单候选也由前端展示并等待人工确认。"""
+    return service.search(actor, sid, command, key)
 
 
 @router.post("/sessions/{sid}/confirm", response_model=OperationHandle, status_code=202, summary="确认用户选定的主体", description="明确选择后才启动资料查询的长任务。")

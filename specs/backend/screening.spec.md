@@ -4,12 +4,12 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 标识 / 文档版本 | SDD-BE-SCREENING / v1.5 |
+| 标识 / 文档版本 | SDD-BE-SCREENING / v1.6 |
 | 行为契约 | CONTRACT-1.0，SDD与首批测试已确认；逐函数实现中 |
 | PRD / UI 基线 | [PRD-1.0](../common/prd.md)、[UI-1.0](../common/ui_notes.md) |
 | 共享定义 | [global_schema.md](../common/global_schema.md)、[输入 Schema](../../contracts/input-schema.json)、[输出 Schema](../../contracts/output-schema.json) |
 | 责任人 / 评审人 | 项目开发者（用户本人） |
-| 日期 / 状态 | 2026-10-23 / 已实现会话create/restore/reset、HTTP入口、错误包及天眼查MCP搜索适配器；鉴权与业务HTTP路由待接通 |
+| 日期 / 状态 | 2026-10-23 / 已接通签名Cookie会话、候选搜索应用服务与HTTP路由；主体确认及后续流水线待实现 |
 
 | 日期 | 版本 | 变更 | 评审记录 |
 | --- | --- | --- | --- |
@@ -20,6 +20,7 @@
 | 2026-10-23 | v1.3 | 首批测试确认后逐函数实现会话create/restore/reset，行为契约不变 | 用户回复“继续，第一步是开发什么？”；50用例中46通过/4占位失败；进程内存切片，完整存储与HTTP待实现 |
 | 2026-10-23 | v1.4 | BE-ERR-01增加通用字段校验文案键input_invalid，接通HTTP应用装配及统一错误包 | 用户明确选择“新增通用提示（推荐）”；业务字段/方法签名不变，文案基线TEXT-1.1，测试与实现记录见tests/test-cases.md |
 | 2026-10-23 | v1.5 | 核验天眼查当前MCP Shared Core搜索协议并实现CompanyDataPort搜索适配器；CONTRACT-1.0不变 | 用户提供天眼AI页面及MCP API Key继续真实接入；鉴权健康检查与一次最小搜索通过，适配器测试见tests/test-cases.md |
+| 2026-10-23 | v1.6 | 实现签名匿名Cookie、会话HTTP边界与ScreeningService.search，将天眼查适配器接入搜索路由；CONTRACT-1.0不变 | 用户回复“继续”；新增会话/搜索契约用例并完成对应垂直切片，执行记录见tests/test-cases.md |
 
 ## 2. 目标与范围
 
