@@ -14,6 +14,7 @@ from pydantic import (
     ConfigDict,
     Field,
     RootModel,
+    StrictBool,
     StrictInt,
     StrictStr,
     StringConstraints,
@@ -97,6 +98,63 @@ class Subject(ContractModel):
     established_on: Annotated[date | None, Field(description='成立日期；未知为 null。')]
     confirmed_at: Annotated[
         Timestamp, Field(description='用户人工确认时由服务端记录。')
+    ]
+
+
+class JudicialToolName(StrEnum):
+    """
+    固定司法计划中的工具名，不包含其他业务工具。
+    """
+
+    get_dishonest_info = 'get_dishonest_info'
+    get_judgment_debtor_info = 'get_judgment_debtor_info'
+    get_high_consumption_restriction = 'get_high_consumption_restriction'
+    get_judicial_case = 'get_judicial_case'
+    get_judicial_documents = 'get_judicial_documents'
+    get_court_notice = 'get_court_notice'
+
+
+class Status(StrEnum):
+    """
+    完整有记录、完整空、有限取得、子工具失败、预算内未请求；不混同无风险。
+    """
+
+    complete = 'complete'
+    empty = 'empty'
+    partial = 'partial'
+    error = 'error'
+    not_requested = 'not_requested'
+
+
+class ToolCoverage(ContractModel):
+    """
+    QUERY-WINDOW-1.0：本次司法子工具实际接纳范围，不是账户额度或风险评分。
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    tool_name: JudicialToolName
+    status: Annotated[
+        Status,
+        Field(
+            description='完整有记录、完整空、有限取得、子工具失败、预算内未请求；不混同无风险。'
+        ),
+    ]
+    accepted_count: Annotated[
+        StrictInt,
+        Field(description='本次实际接纳记录数，不是上游全部记录数。', ge=0, le=200),
+    ]
+    total_count: Annotated[
+        StrictInt | None,
+        Field(
+            description='上游声明的本工具总数；未知或不可信为null，不用于推算独立案件数。',
+            ge=0,
+        ),
+    ]
+    has_more: Annotated[
+        StrictBool | None,
+        Field(description='已知仍有剩余为true，证明完整才为false，不确定为null。'),
     ]
 
 
@@ -536,11 +594,12 @@ class SelfUserEvidence(ContractModel):
     hint_id: Literal['SOURCE_USER_SELF']
 
 
-class Status(StrEnum):
+class Status1(StrEnum):
     ok = 'ok'
     empty = 'empty'
     error = 'error'
     not_requested = 'not_requested'
+    partial = 'partial'
 
 
 class OkCategoryResult(ContractModel):
@@ -559,6 +618,14 @@ class OkCategoryResult(ContractModel):
         ),
     ]
     error_code: None
+    tool_coverage: Annotated[
+        list[ToolCoverage],
+        Field(
+            description='司法有限查询的子工具范围；旧结果缺省空数组，不据此推断历史覆盖。',
+            max_length=6,
+            validate_default=True,
+        ),
+    ] = []
 
 
 class EmptyCategoryResult(ContractModel):
@@ -577,6 +644,14 @@ class EmptyCategoryResult(ContractModel):
         ),
     ]
     error_code: None
+    tool_coverage: Annotated[
+        list[ToolCoverage],
+        Field(
+            description='司法有限查询的子工具范围；旧结果缺省空数组，不据此推断历史覆盖。',
+            max_length=6,
+            validate_default=True,
+        ),
+    ] = []
 
 
 class ErrorCode(StrEnum):
@@ -605,6 +680,14 @@ class ErrorCategoryResult(ContractModel):
         ),
     ]
     error_code: ErrorCode
+    tool_coverage: Annotated[
+        list[ToolCoverage],
+        Field(
+            description='司法有限查询的子工具范围；旧结果缺省空数组，不据此推断历史覆盖。',
+            max_length=6,
+            validate_default=True,
+        ),
+    ] = []
 
 
 class NotRequestedCategoryResult(ContractModel):
@@ -623,6 +706,50 @@ class NotRequestedCategoryResult(ContractModel):
         ),
     ]
     error_code: None
+    tool_coverage: Annotated[
+        list[ToolCoverage],
+        Field(
+            description='司法有限查询的子工具范围；旧结果缺省空数组，不据此推断历史覆盖。',
+            max_length=6,
+            validate_default=True,
+        ),
+    ] = []
+
+
+class ErrorCode1(Enum):
+    UPSTREAM_TIMEOUT = 'UPSTREAM_TIMEOUT'
+    UPSTREAM_AUTH = 'UPSTREAM_AUTH'
+    UPSTREAM_LIMIT = 'UPSTREAM_LIMIT'
+    UPSTREAM_ERROR = 'UPSTREAM_ERROR'
+    UPSTREAM_INVALID = 'UPSTREAM_INVALID'
+    UPSTREAM_INCOMPLETE = 'UPSTREAM_INCOMPLETE'
+    SUBJECT_RESPONSE_MISMATCH = 'SUBJECT_RESPONSE_MISMATCH'
+
+
+class PartialCategoryResult(ContractModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    status: Literal['partial']
+    record_count: Annotated[StrictInt, Field(ge=0, le=200)]
+    queried_at: Timestamp
+    scope_description: Annotated[
+        StrictStr,
+        Field(
+            description='本类别实际接口/子范围及期间覆盖；不能把一个子接口说成全部司法/资产记录。',
+            max_length=500,
+            min_length=1,
+        ),
+    ]
+    error_code: ErrorCode1 | None
+    tool_coverage: Annotated[
+        list[ToolCoverage],
+        Field(
+            description='司法有限查询的子工具范围；旧结果缺省空数组，不据此推断历史覆盖。',
+            max_length=6,
+            validate_default=True,
+        ),
+    ] = []
 
 
 class PlannedCategories(RootModel[list[Category]]):
@@ -641,13 +768,15 @@ class CategoryResult(
         | EmptyCategoryResult
         | ErrorCategoryResult
         | NotRequestedCategoryResult
+        | PartialCategoryResult
     ]
 ):
     root: Annotated[
         OkCategoryResult
         | EmptyCategoryResult
         | ErrorCategoryResult
-        | NotRequestedCategoryResult,
+        | NotRequestedCategoryResult
+        | PartialCategoryResult,
         Field(title='CategoryResult'),
     ]
 

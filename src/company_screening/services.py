@@ -18,7 +18,10 @@ from .contracts.boundary import (
     SessionExpiry, SubmitEvidenceCommand, WithdrawalResult, WorkspaceState,
 )
 from .errors import ApplicationError, ProviderError
-from .contracts.generated import Category, HintCode, LlmStatus, NullableText, QueryDiagnostic, Subject, WorkflowPayload
+from .contracts.generated import (
+    Category, CategoryResults, HintCode, JudicialToolName, LlmStatus, NullableText,
+    QueryDiagnostic, Subject, WorkflowPayload,
+)
 from .ports import CompanyDataPort
 
 
@@ -190,7 +193,7 @@ class SessionService:
                 len(set(command.categories)) != len(command.categories)
                 or any(
                     category not in state.payload.api_status.planned_categories.root
-                    or getattr(state.payload.api_status.categories, category.value).root.status != "error"
+                    or getattr(state.payload.api_status.categories, category.value).root.status not in ("error", "partial")
                     for category in command.categories
                 )
             ):
@@ -752,7 +755,7 @@ class ScreeningService:
         query_diagnostics = {
             key: detail.model_copy(deep=True)
             for key, detail in (previous.api_status.query_diagnostics or {}).items()
-            if getattr(previous.api_status.categories, key).root.status == "error"
+            if getattr(previous.api_status.categories, key).root.status in ("error", "partial")
         } if previous is not None else {}
         planned = previous.api_status.planned_categories.root if previous is not None else list(Category)
         expected_credit = subject.credit_code.root
@@ -772,7 +775,23 @@ class ScreeningService:
                 }
                 continue
             try:
-                batch = self._company_data.fetch_category(subject, category)
+                retained_rows = [row for row in evidence_rows if not (
+                    row["source"] == "tianyan" and row["category"] == category.value
+                )]
+                if category == Category.judicial:
+                    record_budget = min(120, 200 - len(retained_rows))
+                    if record_budget <= 0:
+                        capacity_error = ProviderError("No evidence capacity for judicial window")
+                        capacity_error.code, capacity_error.retryable = "UPSTREAM_INCOMPLETE", False
+                        capacity_error.diagnostic = _query_diagnostic(
+                            "RECORD_LIMIT_EXCEEDED", "aggregate", field="record_count",
+                            actual_count=len(retained_rows), limit_count=200,
+                        )
+                        raise capacity_error
+                    batch = self._company_data.fetch_category(subject, category, record_limit=record_budget)
+                else:
+                    record_budget = 200
+                    batch = self._company_data.fetch_category(subject, category)
                 if batch.category != category:
                     provider_failure = ProviderError("Provider category does not match query")
                     provider_failure.code, provider_failure.retryable = "UPSTREAM_INVALID", False
@@ -802,10 +821,53 @@ class ScreeningService:
                         "error_code": "SUBJECT_RESPONSE_MISMATCH",
                     }
                     continue
+                invalid_coverage = False
+                if category != Category.judicial:
+                    invalid_coverage = (batch.completeness != "complete" or bool(batch.tool_coverage)
+                                        or batch.error_code is not None or batch.diagnostic is not None)
+                elif batch.tool_coverage:
+                    coverage_rows = batch.tool_coverage
+                    tool_names = [item.tool_name.value for item in coverage_rows]
+                    has_failure = any(item.status.value == "error" for item in coverage_rows)
+                    unfinished = any(item.status.value not in ("complete", "empty") for item in coverage_rows)
+                    reliable = any(item.status.value in ("complete", "empty", "partial") for item in coverage_rows)
+                    invalid_coverage = (
+                        len(tool_names) != 6 or set(tool_names) != {item.value for item in JudicialToolName}
+                        or sum(item.accepted_count for item in coverage_rows) != len(batch.records)
+                        or (batch.completeness == "partial") != unfinished or not reliable
+                        or (batch.error_code is not None) != has_failure
+                        or (batch.diagnostic is not None and not has_failure)
+                    )
+                    for item in coverage_rows:
+                        status = item.status.value
+                        if status == "complete":
+                            invalid_coverage |= (item.accepted_count == 0 or item.total_count != item.accepted_count
+                                                 or item.has_more is not False)
+                        elif status == "empty":
+                            invalid_coverage |= item.accepted_count != 0 or item.total_count != 0 or item.has_more is not False
+                        elif status in ("error", "not_requested"):
+                            invalid_coverage |= (item.accepted_count != 0 or item.total_count is not None
+                                                 or item.has_more is not None)
+                        else:
+                            invalid_coverage |= (item.has_more is False or (
+                                item.total_count is not None and item.total_count < item.accepted_count
+                            ))
+                elif batch.completeness != "complete" or batch.error_code is not None or batch.diagnostic is not None:
+                    invalid_coverage = True
+                if invalid_coverage:
+                    coverage_error = ProviderError("Provider coverage does not match evidence")
+                    coverage_error.code, coverage_error.retryable = "UPSTREAM_INVALID", False
+                    coverage_error.diagnostic = _query_diagnostic("RESPONSE_INVALID", "aggregate")
+                    raise coverage_error
                 record_ids = [record.record_id for record in batch.records]
-                retained_rows = [row for row in evidence_rows if not (
-                    row["source"] == "tianyan" and row["category"] == category.value
-                )]
+                if category == Category.judicial and len(batch.records) > record_budget:
+                    budget_error = ProviderError("Provider exceeded judicial record budget")
+                    budget_error.code, budget_error.retryable = "UPSTREAM_INCOMPLETE", False
+                    budget_error.diagnostic = _query_diagnostic(
+                        "RECORD_LIMIT_EXCEEDED", "aggregate", field="record_count",
+                        actual_count=len(batch.records), limit_count=record_budget,
+                    )
+                    raise budget_error
                 if len(record_ids) != len(set(record_ids)) or len(retained_rows) + len(batch.records) > 200:
                     duplicate = len(record_ids) != len(set(record_ids))
                     query_diagnostics[category.value] = _query_diagnostic(
@@ -845,15 +907,21 @@ class ScreeningService:
                         "verification_status": "original_not_verified",
                         "hint_id": "SOURCE_TIANYAN",
                     })
-                # 完整类别通过校验后才替换，用户来源始终保留。
+                # 仅接纳已校验的批次，司法窗口将未取得范围同时发布；用户来源始终保留。
                 evidence_rows = [*retained_rows, *category_evidence]
                 category_results[category.value] = {
-                    "status": "ok" if batch.records else "empty",
+                    "status": "partial" if batch.completeness == "partial" else "ok" if batch.records else "empty",
                     "record_count": len(batch.records),
                     "queried_at": batch.queried_at,
                     "scope_description": batch.scope_description,
-                    "error_code": None,
+                    "error_code": batch.error_code,
+                    "tool_coverage": [item.model_dump(mode="python") for item in batch.tool_coverage],
                 }
+                if batch.error_code is not None:
+                    query_diagnostics[category.value] = (
+                        QueryDiagnostic.model_validate(batch.diagnostic.model_dump(mode="python"))
+                        if batch.diagnostic is not None else _query_diagnostic()
+                    )
             except ProviderError as exc:
                 try:
                     detail = (QueryDiagnostic.model_validate(exc.diagnostic.model_dump(mode="python"))
@@ -878,10 +946,12 @@ class ScreeningService:
                     "error_code": "UPSTREAM_INVALID",
                 }
 
+        # 兼容旧省略字段与新默认空数组，不能因等值覆盖的序列化差异递增分析版本。
+        category_results = CategoryResults.model_validate(category_results).model_dump(mode="python")
         statuses = [str(category_results[category.value]["status"]) for category in planned]
         if all(status == "error" for status in statuses):
             tianyan_status = "error"
-        elif any(status == "error" for status in statuses):
+        elif any(status in ("error", "partial") for status in statuses):
             tianyan_status = "partial"
         elif any(status == "ok" for status in statuses):
             tianyan_status = "ok"

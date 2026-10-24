@@ -85,6 +85,12 @@ class _ToolRecords(list[ProviderRecord]):
     http_status: int | None = None
 
 
+class _SourceItem(dict[str, Any]):
+    """在规范化期间保留聚合来源命名空间，不向正文注入内部字段。"""
+
+    source_name: str
+
+
 def _provider_error(
     code: ProviderFailureCode,
     retryable: bool,
@@ -261,8 +267,12 @@ class TianyanMcpAdapter:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError, ValidationError) as exc:
             raise _provider_error("UPSTREAM_INVALID", False) from exc
 
-    def fetch_category(self, subject: Subject, category: Category) -> ProviderCategoryBatch:
-        """按固定子工具计划完整取得一个类别；任何部分失败都拒绝整个批次。"""
+    def fetch_category(
+        self, subject: Subject, category: Category, *, record_limit: int = 200,
+    ) -> ProviderCategoryBatch:
+        """司法按已确认窗口返回明确范围；其他类别仍要求完整取得。"""
+        if category == Category.judicial:
+            return self._fetch_judicial_window(subject, record_limit)
         records: list[ProviderRecord] = []
         http_status: int | None = None
         last_tool: str | None = None
@@ -301,6 +311,86 @@ class TianyanMcpAdapter:
             scope_description=_CATEGORY_SCOPE[category],
             records=records,
         )
+
+    def _fetch_judicial_window(self, subject: Subject, record_limit: int) -> ProviderCategoryBatch:
+        """WINDOW-IF-01：固定六项各取首批，原子接纳有效页并保留真实缺口。"""
+        if isinstance(record_limit, bool) or not isinstance(record_limit, int) or record_limit < 1:
+            raise _provider_error("UPSTREAM_INCOMPLETE", False, reason_code="RECORD_LIMIT_EXCEEDED",
+                                  phase="aggregate", field="record_count", limit_count=200)
+        remaining = min(record_limit, 120)
+        records: list[ProviderRecord] = []
+        coverage: list[dict[str, Any]] = []
+        first_error: ProviderError | None = None
+        reliable_tools = 0
+        for tool_name, _ in _CATEGORY_TOOL_PLAN[Category.judicial]:
+            if remaining == 0:
+                coverage.append({"tool_name": tool_name, "status": "not_requested", "accepted_count": 0,
+                                 "total_count": None, "has_more": None})
+                continue
+            page_size = min(20, remaining)
+            content: _ToolContent | None = None
+            try:
+                content = self._call_tool(tool_name, {
+                    "searchKey": subject.credit_code.root, "pageNum": 1, "pageSize": page_size,
+                })
+                unknown_total = "items" in content and content.get("total") is None
+                page_content: dict[str, Any] = content
+                if unknown_total:
+                    # 临时计数仅用于已有页结构校验，不能作为公开total或完整性依据。
+                    raw_items = content.get("items")
+                    page_content = {**content, "total": len(raw_items) if isinstance(raw_items, list) else 0}
+                items, declared_total, _ = self._extract_page(page_content, 1)
+                if len(items) > page_size:
+                    raise _provider_error("UPSTREAM_INVALID", False, reason_code="PAGINATION_INVALID",
+                                          phase="pagination", field="items", actual_count=len(items))
+                if not items and declared_total > 0:
+                    raise _provider_error("UPSTREAM_INCOMPLETE", False, reason_code="PAGINATION_INCOMPLETE",
+                                          phase="pagination", field="items", actual_count=0)
+                page_records = [self._make_record(subject, tool_name, item, nested_metadata=False) for item in items]
+                if len({record.record_id for record in page_records}) != len(page_records):
+                    raise _provider_error("UPSTREAM_INVALID", False, reason_code="DUPLICATE_RECORDS",
+                                          phase="aggregate", field="record_id")
+                total = None if unknown_total else declared_total
+                truncated = content.get("_truncated") not in (None, False)
+                has_more: bool | None = None if unknown_total else declared_total > len(page_records)
+                if truncated and has_more is False:
+                    has_more = None
+                incomplete = unknown_total or truncated or has_more is True
+                records.extend(page_records)
+                remaining -= len(page_records)
+                reliable_tools += 1
+                coverage.append({
+                    "tool_name": tool_name,
+                    "status": "partial" if incomplete else "complete" if page_records else "empty",
+                    "accepted_count": len(page_records), "total_count": total, "has_more": has_more,
+                })
+            except ProviderError as exc:
+                detail: dict[str, Any] = exc.diagnostic.model_dump(mode="python") if exc.diagnostic is not None else {
+                    "diagnostic_id": uuid4(), "tool_name": None, "phase": "unknown",
+                    "reason_code": "UNCLASSIFIED_FAILURE", "http_status": None,
+                    "field": None, "actual_count": None, "limit_count": None,
+                }
+                detail["tool_name"] = tool_name
+                if detail["http_status"] is None and content is not None:
+                    detail["http_status"] = content.http_status
+                exc.diagnostic = QueryDiagnostic.model_validate(detail)
+                if first_error is None:
+                    first_error = exc
+                coverage.append({"tool_name": tool_name, "status": "error", "accepted_count": 0,
+                                 "total_count": None, "has_more": None})
+        if reliable_tools == 0 and first_error is not None:
+            raise first_error
+        partial = any(item["status"] not in ("complete", "empty") for item in coverage)
+        return ProviderCategoryBatch.model_validate({
+            "binding_credit_code": subject.credit_code.root, "category": Category.judicial,
+            "queried_at": datetime.now(timezone.utc),
+            "scope_description": "司法固定六项各取第一页、每项最多20条；未完成部分见子工具覆盖" if partial
+                                 else _CATEGORY_SCOPE[Category.judicial],
+            "records": records, "completeness": "partial" if partial else "complete",
+            "tool_coverage": coverage,
+            "error_code": first_error.code if first_error is not None else None,
+            "diagnostic": first_error.diagnostic if first_error is not None else None,
+        })
 
     def _fetch_paged_tool(self, subject: Subject, tool_name: str) -> _ToolRecords:
         """完整读取一个明细工具的所有页面，并核对页码、总数和类别预算。"""
@@ -369,7 +459,7 @@ class TianyanMcpAdapter:
         all_items: list[dict[str, Any]] = []
         total = 0
         has_more = False
-        for source in sources.values():
+        for source_name, source in sources.items():
             if not isinstance(source, dict):
                 raise _provider_error("UPSTREAM_INVALID", False, reason_code="RESPONSE_INVALID",
                                       phase="response", field="sources")
@@ -377,7 +467,10 @@ class TianyanMcpAdapter:
             if source.get("_empty") is True or source.get("empty") is True:
                 source = {**source, "items": source.get("items", []), "total": source.get("total", 0)}
             part_items, part_total, part_more = self._page_part(source, expected_page)
-            all_items.extend(part_items)
+            for item in part_items:
+                sourced_item = _SourceItem(item)
+                sourced_item.source_name = str(source_name)
+                all_items.append(sourced_item)
             total += part_total
             has_more = has_more or part_more
         return all_items, total, has_more
@@ -475,9 +568,15 @@ class TianyanMcpAdapter:
         suffix = str(explicit_id).strip() if explicit_id not in (None, "") else hashlib.sha256(
             canonical.encode("utf-8")
         ).hexdigest()[:32]
-        record_id = f"{tool_name}:{suffix}"
+        namespace = tool_name
+        if isinstance(raw, _SourceItem):
+            # 聚合来源的ID仅在各自来源内唯一；同一来源的真实重复仍交给批次校验拒绝。
+            source_digest = hashlib.sha256(raw.source_name.encode("utf-8")).hexdigest()[:16]
+            namespace = f"{tool_name}:source-{source_digest}"
+        record_id = f"{namespace}:{suffix}"
         if len(record_id) > 256:
-            record_id = f"{tool_name}:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+            identity = f"{namespace}:{canonical}"
+            record_id = f"{tool_name}:{hashlib.sha256(identity.encode('utf-8')).hexdigest()}"
 
         event_time = self._small_text(self._find_value(raw, _TIME_KEYS, recursive=nested_metadata), field="event_time")
         source_url = self._small_text(self._find_value(raw, _URL_KEYS, recursive=nested_metadata), 2048, field="source_url")

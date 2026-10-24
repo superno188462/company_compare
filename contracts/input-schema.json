@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://company-screening.invalid/schemas/input-schema.json",
-  "title": "企业公开线索分析节点输入 v1.0",
+  "title": "企业公开线索分析节点输入 v1.1（QUERY-WINDOW-1.0）",
   "description": "仅允许受控主体、已接纳证据和查询覆盖。所有引用由本地注册表解析，不请求 schema 地址。跨字段业务约束见 specs/common/global_schema.md。",
   "type": "object",
   "additionalProperties": false,
@@ -82,21 +82,36 @@
         }
       ]
     },
+    "JudicialToolName": {"type": "string", "enum": ["get_dishonest_info", "get_judgment_debtor_info", "get_high_consumption_restriction", "get_judicial_case", "get_judicial_documents", "get_court_notice"], "description": "固定司法计划中的工具名，不包含其他业务工具。"},
+    "ToolCoverage": {
+      "type": "object", "additionalProperties": false,
+      "description": "QUERY-WINDOW-1.0：本次司法子工具实际接纳范围，不是账户额度或风险评分。",
+      "required": ["tool_name", "status", "accepted_count", "total_count", "has_more"],
+      "properties": {
+        "tool_name": {"$ref": "#/$defs/JudicialToolName"},
+        "status": {"type": "string", "enum": ["complete", "empty", "partial", "error", "not_requested"], "description": "完整有记录、完整空、有限取得、子工具失败、预算内未请求；不混同无风险。"},
+        "accepted_count": {"type": "integer", "minimum": 0, "maximum": 200, "description": "本次实际接纳记录数，不是上游全部记录数。"},
+        "total_count": {"type": ["integer", "null"], "minimum": 0, "description": "上游声明的本工具总数；未知或不可信为null，不用于推算独立案件数。"},
+        "has_more": {"type": ["boolean", "null"], "description": "已知仍有剩余为true，证明完整才为false，不确定为null。"}
+      }
+    },
     "CategoryResult": {
       "type": "object", "additionalProperties": false,
       "required": ["status", "record_count", "queried_at", "scope_description", "error_code"],
       "properties": {
-        "status": {"type": "string", "enum": ["ok", "empty", "error", "not_requested"]},
+        "status": {"type": "string", "enum": ["ok", "empty", "error", "not_requested", "partial"]},
         "record_count": {"type": "integer", "minimum": 0, "maximum": 200},
         "queried_at": {"$ref": "#/$defs/NullableTimestamp"},
         "scope_description": {"type": "string", "minLength": 1, "maxLength": 500, "description": "本类别实际接口/子范围及期间覆盖；不能把一个子接口说成全部司法/资产记录。"},
-        "error_code": {"type": ["string", "null"], "enum": [null, "UPSTREAM_TIMEOUT", "UPSTREAM_AUTH", "UPSTREAM_LIMIT", "UPSTREAM_ERROR", "UPSTREAM_INVALID", "UPSTREAM_INCOMPLETE", "SUBJECT_RESPONSE_MISMATCH"]}
+        "error_code": {"type": ["string", "null"], "enum": [null, "UPSTREAM_TIMEOUT", "UPSTREAM_AUTH", "UPSTREAM_LIMIT", "UPSTREAM_ERROR", "UPSTREAM_INVALID", "UPSTREAM_INCOMPLETE", "SUBJECT_RESPONSE_MISMATCH"]},
+        "tool_coverage": {"type": "array", "maxItems": 6, "default": [], "items": {"$ref": "#/$defs/ToolCoverage"}, "description": "司法有限查询的子工具范围；旧结果缺省空数组，不据此推断历史覆盖。"}
       },
       "allOf": [
         {"if": {"properties": {"status": {"const": "ok"}}}, "then": {"properties": {"record_count": {"minimum": 1}, "queried_at": {"$ref": "#/$defs/Timestamp"}, "error_code": {"type": "null"}}}},
         {"if": {"properties": {"status": {"const": "empty"}}}, "then": {"properties": {"record_count": {"const": 0}, "queried_at": {"$ref": "#/$defs/Timestamp"}, "error_code": {"type": "null"}}}},
         {"if": {"properties": {"status": {"const": "error"}}}, "then": {"properties": {"record_count": {"const": 0}, "queried_at": {"$ref": "#/$defs/Timestamp"}, "error_code": {"type": "string"}}}},
-        {"if": {"properties": {"status": {"const": "not_requested"}}}, "then": {"properties": {"record_count": {"const": 0}, "queried_at": {"type": "null"}, "error_code": {"type": "null"}}}}
+        {"if": {"properties": {"status": {"const": "not_requested"}}}, "then": {"properties": {"record_count": {"const": 0}, "queried_at": {"type": "null"}, "error_code": {"type": "null"}}}},
+        {"if": {"properties": {"status": {"const": "partial"}}}, "then": {"properties": {"queried_at": {"$ref": "#/$defs/Timestamp"}}}}
       ]
     },
     "CategoryResults": {

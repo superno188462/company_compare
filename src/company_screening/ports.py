@@ -13,8 +13,10 @@ class CompanyDataPort(Protocol):
         """搜索候选；不得代用户选择。"""
         raise NotImplementedError()
 
-    def fetch_category(self, subject: Subject, category: Category) -> ProviderCategoryBatch:
-        """返回完整分类批次；不完整取得应抛 ProviderError。"""
+    def fetch_category(
+        self, subject: Subject, category: Category, *, record_limit: int = 200,
+    ) -> ProviderCategoryBatch:
+        """返回分类批次；司法窗口遵守剩余容量，其他类别仍要求完整取得。"""
         raise NotImplementedError()
 
 

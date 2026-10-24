@@ -44,7 +44,9 @@ class QueryFakeCompanyData:
             established_on=None,
         )], next_cursor=None, total=1)
 
-    def fetch_category(self, subject: Subject, category: Category) -> ProviderCategoryBatch:
+    def fetch_category(
+        self, subject: Subject, category: Category, *, record_limit: int = 200,
+    ) -> ProviderCategoryBatch:
         self.fetch_calls.append(category)
         response = self.responses[category]
         if isinstance(response, ProviderError):

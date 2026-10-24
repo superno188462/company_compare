@@ -58,6 +58,15 @@ def expand_variants(definitions: dict[str, Any], name: str, names: list[str]) ->
                 original.update(copy.deepcopy(rule))
                 if rule.get("type") == "string" and "enum" in original:
                     original["enum"] = [value for value in original["enum"] if isinstance(value, str)]
+        for field_name, definition in list(variant["properties"].items()):
+            if isinstance(definition.get("type"), list) and "null" in definition["type"] and None in definition.get("enum", []):
+                # nullable枚举必须生成为Enum | None，不能把null生成为一个Enum成员。
+                non_null = {**definition, "type": [value for value in definition["type"] if value != "null"],
+                            "enum": [value for value in definition["enum"] if value is not None]}
+                variant["properties"][field_name] = {
+                    "anyOf": [non_null, {"type": "null"}],
+                    **({"description": definition["description"]} if "description" in definition else {}),
+                }
         variant["title"] = class_name
         definitions[class_name] = variant
         refs.append({"$ref": f"#/$defs/{class_name}"})
@@ -74,7 +83,7 @@ def build_bundle() -> dict[str, Any]:
     # 原有字符串约束，完整 URI 校验仍以原 JSON Schema 为准。
     definitions["HttpUrl"].pop("format")
     expand_variants(definitions, "Evidence", ["TianyanEvidence", "OtherUserEvidence", "SelfUserEvidence"])
-    expand_variants(definitions, "CategoryResult", ["OkCategoryResult", "EmptyCategoryResult", "ErrorCategoryResult", "NotRequestedCategoryResult"])
+    expand_variants(definitions, "CategoryResult", ["OkCategoryResult", "EmptyCategoryResult", "ErrorCategoryResult", "NotRequestedCategoryResult", "PartialCategoryResult"])
     definitions["SnapshotDraft"]["properties"]["evidence"] = {"$ref": "#/$defs/OtherUserEvidence"}
     # 生成器不应把 if/then 的局部字段误生成为可独立调用的应用模型。
     # 完整条件仍由原 output-schema.json 约束，骨架不实现该校验。

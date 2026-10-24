@@ -43,6 +43,7 @@ IMPLEMENTED = {
     ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter._call_tool"),
     ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter.search"),
     ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter.fetch_category"),
+    ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter._fetch_judicial_window"),
     ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter._fetch_paged_tool"),
     ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter._extract_page"),
     ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter._page_part"),
@@ -154,6 +155,11 @@ def check_signatures(relative: str, expected: dict[str, list[str]]) -> None:
             for node in cls.body:
                 if isinstance(node, ast.FunctionDef) and not node.name.startswith("_"):
                     actual[f"{cls.name}.{node.name}"] = [arg.arg for arg in node.args.args]
+                    if relative == "src/company_screening/ports.py" and node.name == "fetch_category":
+                        assert [arg.arg for arg in node.args.kwonlyargs] == ["record_limit"]
+                        assert len(node.args.kw_defaults) == 1
+                        default = node.args.kw_defaults[0]
+                        assert isinstance(default, ast.Constant) and default.value == 200
     assert actual == expected, (relative, actual)
 
 
@@ -162,7 +168,7 @@ def check_shared_models() -> None:
     inputs = json.loads((ROOT / "contracts/input-schema.json").read_text(encoding="utf-8"))
     outputs = json.loads((ROOT / "contracts/output-schema.json").read_text(encoding="utf-8"))
     definitions = {**inputs["$defs"], **outputs["$defs"], "LlmInput": inputs, "WorkflowPayload": outputs}
-    for name in ("Subject", "CategoryResults", "QueryCoverage", "QueryDiagnostic", "SnapshotDraft", "WorkflowStatus", "SubmissionReceipt", "LlmInput", "WorkflowPayload"):
+    for name in ("Subject", "ToolCoverage", "CategoryResults", "QueryCoverage", "QueryDiagnostic", "SnapshotDraft", "WorkflowStatus", "SubmissionReceipt", "LlmInput", "WorkflowPayload"):
         model = getattr(generated, name)
         schema = definitions[name]
         assert set(model.model_fields) == set(schema["properties"]), name

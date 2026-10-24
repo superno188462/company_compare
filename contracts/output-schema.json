@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://company-screening.invalid/schemas/output-schema.json",
-  "title": "企业公开线索工作流完整结果 v1.1（DIAG-1.0）",
+  "title": "企业公开线索工作流完整结果 v1.2（DIAG-1.0 + QUERY-WINDOW-1.0）",
   "description": "已确认主体后的完整工作台结果；搜索、草稿和进度响应的其他边界见后端 SDD。仅本地解析 input-schema.json 引用。",
   "type": "object", "additionalProperties": false,
   "required": ["subject", "evidence_list", "summary_text", "api_status", "ui_hint_group"],

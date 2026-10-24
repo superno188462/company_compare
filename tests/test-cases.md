@@ -1,6 +1,14 @@
 # 企业公开线索筛查验收用例规划
 
-版本：v0.5；日期：2026-10-24；状态：当前205项通过，包含已确认的DIAG-TEST-1诊断扩展50项；下文保留各阶段最初结果与评审依据，首批及其他已锁定测试不变。
+版本：v0.6；日期：2026-10-24；状态：当前246项通过，包含已确认的WINDOW-TEST-1司法窗口41项；下文保留各阶段最初结果与评审依据，原205项断言不变。
+
+## 2026-10-24 WINDOW-1.0（已确认并实现）
+
+用户依次确认有限查询SDD/UI、WINDOW-TYPE-1与WINDOW-TEST-1。新增`test_query_window_adapter.py`20项、`test_query_window_service.py`21项，覆盖5564条总数下的有界首批、六项固定范围、逐子项完整/空/失败/部分/未查询、未知总数、全包容量、同范围重查、私人数据保留、幂等/所有权、HTTP与Schema。两处既有提供方替身仅增加可选record_limit签名，原断言不变。
+
+实现后全量246通过；mypy15文件、结构检查57个已实现/7个占位、React类型与生产构建通过。兼容修复保留了原“诊断变化不增加分析版本”断言。真实工商3条、司法有界首批60条通过，未查询完全部司法记录。
+
+隔离localhost浏览器验证部分结果及失败原因、未知总数、键盘展开无请求、重查处理中禁用、完整恢复清除旧原因、新编辑草稿保留和360像素无横向溢出；测试环境关闭，正式后端已重启、工作台已连接。具体阶段记录与限制见[司法窗口SDD](../specs/backend/query-bounded-results.spec.md)及[测试评审包](../specs/common/query-window-test-review.md)。
 
 关联：[后端 SDD](../specs/backend/screening.spec.md)、[前端 SDD](../specs/frontend/workspace.spec.md)、[共享语义](../specs/common/global_schema.md)。以下所有企业、金额与日期组合均为人工构造的教学输入，不指向真实企业；不得当作生产数据回填。
 

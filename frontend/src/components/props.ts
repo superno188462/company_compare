@@ -29,8 +29,9 @@ export interface SubjectHeaderProps {
 export interface CoveragePanelProps {
   coverage: QueryCoverage;
   busy: boolean;
-  /** DIAG-1.0：仅展示本次失败诊断；缺失表示旧结果尚未记录。 */
+  /** DIAG-1.0 / WINDOW-1.0：失败或含失败子项的partial诊断；不进入模型。 */
   diagnostics?: QueryDiagnostics;
+  /** 对error/partial重取同一范围；不是追加下一页。 */
   onRetry(categories: Category[]): void;
 }
 

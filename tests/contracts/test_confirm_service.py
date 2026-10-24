@@ -29,7 +29,9 @@ class ConfirmFakeCompanyData:
     def search(self, command: SearchCommand) -> ProviderSearchPage:
         return ProviderSearchPage(items=self.candidates, next_cursor=None, total=len(self.candidates))
 
-    def fetch_category(self, subject: Subject, category: Category) -> ProviderCategoryBatch:
+    def fetch_category(
+        self, subject: Subject, category: Category, *, record_limit: int = 200,
+    ) -> ProviderCategoryBatch:
         raise NotImplementedError()
 
 

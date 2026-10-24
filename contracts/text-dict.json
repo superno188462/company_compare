@@ -144,6 +144,20 @@
       "event_time": "事件时间或期间", "source_publisher": "来源发布者"
     }
   },
+  "query_window": {
+    "show": "查看取得范围",
+    "limited": "本次仅分析已取得材料，未查询部分不代表没有风险。重新查询会重取同一范围，不追加下一页。",
+    "order_note": "记录按上游本次第一页顺序返回，不保证是最新记录或能代表全部情况；各接口条数不能相加当作独立案件数。",
+    "previous_result": "正在重新查询；下方为上次完成的取得范围。",
+    "accepted_count": "本次纳入",
+    "total_count": "上游声明总数",
+    "remaining": "剩余情况",
+    "unknown": "未提供",
+    "more": "尚有未取得记录",
+    "complete": "本工具已完整取得",
+    "uncertain": "无法确认是否完整",
+    "status_labels": {"complete": "完整取得", "empty": "本次未返回记录", "partial": "部分取得", "error": "本项查询失败", "not_requested": "本轮预算内未查询"}
+  },
   "actions": {
     "search": "搜索企业",
     "confirm_subject": "确认查询这家公司",
@@ -192,7 +206,7 @@
   },
   "source_labels": {"tianyan": "天眼查聚合资料", "user_other": "其他用户提供", "user_self": "本次用户录入"},
   "category_labels": {"basic": "工商信息", "abnormal": "经营异常", "penalty": "行政处罚", "judicial": "司法与执行", "asset": "资产受限", "other": "其他线索"},
-  "category_status_labels": {"ok": "有数据", "empty": "本次未返回记录", "error": "查询失败", "not_requested": "本次未查询"},
+  "category_status_labels": {"ok": "有数据", "empty": "本次未返回记录", "error": "查询失败", "not_requested": "本次未查询", "partial": "部分取得"},
   "tianyan_status_labels": {"ok": "计划查询完成且有数据", "empty": "计划查询完成但无详情记录", "error": "计划查询全部失败", "partial": "计划查询未全部完成"},
   "llm_status_labels": {"not_started": "尚未开始", "running": "正在生成", "success": "当前版本分析完成", "error": "生成失败", "invalid_output": "输出校验未通过", "skipped_no_evidence": "材料不足，未生成报告"},
   "snapshot_status_labels": {"not_checked": "未查询共享快照", "miss": "暂无可用共享快照", "available": "有待确认快照", "used": "已接纳快照", "error": "快照查询失败"},
@@ -207,6 +221,7 @@
   "official_sites": [
     {"site_id": "gsxt", "label": "国家企业信用信息公示系统", "url": "https://www.gsxt.gov.cn/"},
     {"site_id": "zxgk", "label": "中国执行信息公开网", "url": "https://zxgk.court.gov.cn/"},
+    {"site_id": "zhongdengwang", "label": "动产融资统一登记公示系统（中登网）", "url": "https://www.zhongdengwang.org.cn/"},
     {"site_id": "creditchina", "label": "信用中国", "url": "https://www.creditchina.gov.cn/"}
   ]
 }

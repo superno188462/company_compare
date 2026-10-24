@@ -1,11 +1,13 @@
 # 企业公开线索工作台前端 SDD
 
+> QUERY-WINDOW-1.0及WINDOW-UI-01局部增补已确认：司法覆盖类型新增partial和子工具明细，重查同一范围。UI仍沿用当前工作台，具体状态与计数规则以[司法窗口SDD](../backend/query-bounded-results.spec.md)为准，类型与测试已分别确认，窗口页面已实现并通过浏览器验收。官方入口数据表另补充中登网，沿用既有新标签页/复制能力。
+
 ## 1. 文档头
 
 | 项目 | 内容 |
 | --- | --- |
-| 标识 / 文档版本 | SDD-FE-WORKSPACE / v1.8 |
-| 行为契约 | CONTRACT-1.0 + DIAG-1.0；对应SDD/UI与类型已确认 |
+| 标识 / 文档版本 | SDD-FE-WORKSPACE / v1.9 |
+| 行为契约 | CONTRACT-1.0 + DIAG-1.0 + QUERY-WINDOW-1.0；对应SDD/UI、类型和测试已确认并完成本批实现 |
 | 基线 | [PRD-1.0](../common/prd.md)、[UI-1.0](../common/ui_notes.md) |
 | 后端/共享定义 | [后端 SDD](../backend/screening.spec.md)、[共享契约](../common/global_schema.md) |
 | 责任人 / 评审人 | 项目开发者（用户本人） |
@@ -23,6 +25,7 @@
 | 2026-10-24 | v1.6 | 接通既有CoveragePanel.onRetry及retryQueries，失败类别显示“重新查询”；契约与Schema不变 | 用户明确确认QUERY-RETRY-TEST-1并要求补齐按钮；等待时禁用、网络结果不确定时复用原幂等键，保留本地编辑；隔离浏览器联调通过 |
 | 2026-10-24 | v1.7 | DIAG-1.0：CoveragePanel增加可选diagnostics，error类别提供就地“查看原因” | 用户明确确认本版SDD/UI，具体模型、展示与验收见query-diagnostics.spec.md；进入类型和测试阶段 |
 | 2026-10-24 | v1.8 | 接通诊断折叠区、中文原因/工具/环节/HTTP/字段/数量与旧记录提示，沿用既有重试 | 用户确认DIAG-TYPE-1及50项DIAG-TEST-1后实现；键盘展开、处理中上次原因、失败更新/成功清除、窄屏及脱敏浏览器验证通过 |
+| 2026-10-24 | v1.9 | 实现司法partial、子工具覆盖及同范围重查，中登网沿用官网入口数据表加入 | 用户逐阶段确认WINDOW-SDD/TYPE/TEST；浏览器验证展开不查询、草稿保留和360像素换行；真实模型仍未接入 |
 
 ## 2. 目标与范围
 

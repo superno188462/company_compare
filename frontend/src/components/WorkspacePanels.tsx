@@ -134,7 +134,7 @@ export function CoveragePanel({ coverage, busy, onRetry, diagnostics }: Coverage
                   </span>
                   {result.error_code !== null && <small>{result.error_code}</small>}
                   {result.record_count > 0 && <small>{result.record_count} 条</small>}
-                  {result.status === "error" && coverage.planned_categories.includes(category) && (
+                  {(result.status === "error" || result.status === "partial") && coverage.planned_categories.includes(category) && (
                     <button
                       className="secondary-button"
                       type="button"
@@ -147,7 +147,35 @@ export function CoveragePanel({ coverage, busy, onRetry, diagnostics }: Coverage
                   )}
                 </div>
               </div>
-              {result.status === "error" && (
+              {result.status === "partial" && <p className="window-notice">{dictionary.query_window.limited}</p>}
+              {(result.tool_coverage?.length ?? 0) > 0 && (
+                <details className="query-window">
+                  <summary aria-label={`${dictionary.query_window.show}：${dictionary.category_labels[category]}`}>
+                    {dictionary.query_window.show}
+                  </summary>
+                  {busy && <p className="field-note">{dictionary.query_window.previous_result}</p>}
+                  <ul className="window-tools">
+                    {result.tool_coverage?.map((tool) => (
+                      <li key={tool.tool_name}>
+                        <div className="section-heading">
+                          <strong>{copy.tools[tool.tool_name]}</strong>
+                          <span className="muted">{dictionary.query_window.status_labels[tool.status]}</span>
+                        </div>
+                        <dl className="window-facts">
+                          <div><dt>{dictionary.query_window.accepted_count}</dt><dd>{tool.accepted_count} 条</dd></div>
+                          <div><dt>{dictionary.query_window.total_count}</dt><dd>{tool.total_count ?? dictionary.query_window.unknown}</dd></div>
+                          <div className="window-remaining"><dt>{dictionary.query_window.remaining}</dt><dd>
+                            {tool.has_more === true ? dictionary.query_window.more
+                              : tool.has_more === false ? dictionary.query_window.complete : dictionary.query_window.uncertain}
+                          </dd></div>
+                        </dl>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="field-note">{dictionary.query_window.order_note}</p>
+                </details>
+              )}
+              {(result.status === "error" || (result.status === "partial" && diagnostic !== undefined)) && (
                 <details className="query-diagnostic">
                   <summary aria-label={`${copy.show}：${dictionary.category_labels[category]}`}>{copy.show}</summary>
                   <div className="diagnostic-content">

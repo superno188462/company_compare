@@ -1,11 +1,13 @@
 # 企业公开线索筛查后端 SDD
 
+> 2026-10-24 记录定位缺陷已按原契约修复：聚合来源内的同值ID使用来源命名空间区分，同一来源真实重复仍拒绝。司法新行为QUERY-WINDOW-1.0已获局部PRD/UI与SDD确认，类型/41项测试已分别确认并实现；详见[司法窗口增补](query-bounded-results.spec.md)，其范围优先于下文司法“必须全部分页完整”的旧规则。其他类别不变。
+
 ## 1. 文档头
 
 | 项目 | 内容 |
 | --- | --- |
-| 标识 / 文档版本 | SDD-BE-SCREENING / v2.6 |
-| 行为契约 | CONTRACT-1.0 + DIAG-1.0；对应SDD/类型/测试已确认，逐切片实现中 |
+| 标识 / 文档版本 | SDD-BE-SCREENING / v2.7 |
+| 行为契约 | CONTRACT-1.0 + DIAG-1.0 + QUERY-WINDOW-1.0；对应SDD/类型/测试已确认并完成本批实现 |
 | PRD / UI 基线 | [PRD-1.0](../common/prd.md)、[UI-1.0](../common/ui_notes.md) |
 | 共享定义 | [global_schema.md](../common/global_schema.md)、[输入 Schema](../../contracts/input-schema.json)、[输出 Schema](../../contracts/output-schema.json) |
 | 责任人 / 评审人 | 项目开发者（用户本人） |
@@ -31,6 +33,7 @@
 | 2026-10-24 | v2.4 | 逐函数实现失败类别重试、保留式结果合并、任务释放及HTTP接线；CONTRACT-1.0不变 | 已批准17项重试测试全部通过，全量155通过；隔离合成提供方下浏览器验证按钮、等待/再次失败/成功恢复和草稿保留；未再次调用真实收费接口 |
 | 2026-10-24 | v2.5 | DIAG-1.0分类失败诊断扩展，详情见query-diagnostics.spec.md | 用户明确选择“确认本版 SDD/UI（推荐）”，批准具体字段与规则，进入类型和测试阶段 |
 | 2026-10-24 | v2.6 | DIAG-TYPE-1及DIAG-TEST-1获用户分别确认后逐函数实现脱敏诊断和完整结果接线 | 全量205通过；原155项不变，未知不猜测，输入Schema不变；集成记录见诊断SDD及tests/test-cases.md |
+| 2026-10-24 | v2.7 | 股东来源命名空间修复；QUERY-WINDOW-1.0及类型/41项测试获逐阶段确认后实现有界司法结果 | 全量246通过，真实首批60条、原断言兼容、浏览器专项通过；见窗口SDD |
 
 ## 2. 目标与范围
 
@@ -52,7 +55,7 @@
 | 会话/共享存储 | 主体隔离、原子接纳、版本、幂等和期限能力 | 会话保存失败不启动分析；共享故障可保留已存会话材料 |
 | 时钟/标识/匿名所有者验证 | 服务端时间、不可预测公开 ID、验证过的所有者上下文 | 测试替换时钟与身份，不信任客户端时间/所有者 ID |
 
-提供方原始地址及字段映射属于适配器设计，必须在真实接入前核验。天眼查官方 [tyc-cli](https://github.com/tyc-tech/tyc-cli) 当前说明 MCP 入口为 `https://mcp.tianyancha.com/mcp`，应用使用其无会话 Shared Core `POST /v1/core/tools/call`，搜索工具为 `search_companies`；认证值只放在服务端 `Authorization` 请求头。该搜索返回主体锚定字段，但不返回注册省市，适配器必须将未知地区保留为 null，不能猜测。官方 [catalog.json](https://github.com/tyc-tech/tyc-cli/blob/main/src/catalog.json) 已核验本项目固定子工具计划：basic 使用工商登记、股东；abnormal 使用经营异常；penalty 使用行政处罚；judicial 使用失信、被执行、限高、司法案件、裁判文书、法院公告；asset 使用股权冻结、司法协助、动产抵押、土地抵押。每个明细工具完整分页后才能发布对应类别，任一子工具失败则整类失败。当前Key实测可调用工商登记 L1 工具，其余已探测的 L2 明细工具返回 `insufficient_entitlement`；应用将其映射为 `UPSTREAM_AUTH`，不会把无权限写成无记录。工商登记真实 `sources` 结构已核验，L2成功正文结构目前只由假传输契约覆盖，升级权限后仍需补真实集成验证。已有公开依据的分类能力还包括 [工商基本信息](https://open.tianyancha.com/open/365)、[司法协助](https://open.tianyancha.com/open/756)、[企业年报](https://open.tianyancha.com/open/825)；它们属于另一套 OpenAPI 文档，仅用于能力映射参考，不代表当前 MCP Key 已开通全部工具，也不代表覆盖所有司法或资产线索。
+提供方原始地址及字段映射属于适配器设计，必须在真实接入前核验。天眼查官方 [tyc-cli](https://github.com/tyc-tech/tyc-cli) 当前说明 MCP 入口为 `https://mcp.tianyancha.com/mcp`，应用使用其无会话 Shared Core `POST /v1/core/tools/call`，搜索工具为 `search_companies`；认证值只放在服务端 `Authorization` 请求头。该搜索返回主体锚定字段，但不返回注册省市，适配器必须将未知地区保留为 null，不能猜测。官方 [catalog.json](https://github.com/tyc-tech/tyc-cli/blob/main/src/catalog.json) 已核验本项目固定子工具计划：basic 使用工商登记、股东；abnormal 使用经营异常；penalty 使用行政处罚；judicial 使用失信、被执行、限高、司法案件、裁判文书、法院公告；asset 使用股权冻结、司法协助、动产抵押、土地抵押。除已确认的司法首批窗口外，其他类别仍要求完整分页。当前Key在实时目录中识别为VIP；真实工商3条和司法首批60条已验证。历史403不是所有工具当前无权限的结论；未测试或未覆盖工具仍须分别核验，不把目录空项等同于明细查询成功。已有公开依据的分类能力还包括 [工商基本信息](https://open.tianyancha.com/open/365)、[司法协助](https://open.tianyancha.com/open/756)、[企业年报](https://open.tianyancha.com/open/825)；它们属于另一套 OpenAPI 文档，仅用于能力映射参考，不代表当前 MCP Key 已开通全部工具，也不代表覆盖所有司法或资产线索。
 
 分析方法参照 [skill.md](../analysis/skill.md)，运行时固定提示词为 [llm-system-prompt.txt](../analysis/llm-system-prompt.txt)。Skill 是规则材料，不是具备网络能力的运行时服务。
 
@@ -140,7 +143,7 @@
 | 端口方法 | 签名与语义 |
 | --- | --- |
 | CompanyDataPort.search | `(command: SearchCommand) -> ProviderSearchPage`；只返回规范化候选，不选择主体 |
-| CompanyDataPort.fetch_category | `(subject: Subject, category: Category) -> ProviderCategoryBatch`；必须完整取得对应计划子范围，否则抛 ProviderError |
+| CompanyDataPort.fetch_category | `(subject: Subject, category: Category, *, record_limit: int = 200) -> ProviderCategoryBatch`；司法遵守WINDOW-1.0预算及覆盖，其他类别必须完整取得 |
 | ReportModelPort.generate | `(input: LlmInput, system_prompt: str) -> str`；输入满足输入 Schema；无工具；超时/上下文拒绝抛 ModelError |
 
 `ProviderCandidate` 仅含 Candidate 的 `name / credit_code / registered_region / legal_representative / established_on` 五字段，类型不变；候选 UUID 和 selectable 由应用建立。`ProviderSearchPage` 含 `items: ProviderCandidate[0..20]`、`next_cursor: str?`、`total: int? >=0`。
@@ -149,13 +152,15 @@
 
 `ProviderError` 公共属性为 `code`（输入 Schema 中分类 error_code 的非空枚举）、`retryable: bool`及DIAG-1.0的可选`diagnostic: QueryDiagnostic | None = None`；旧适配器可不提供诊断，应用标记未记录。`ModelError.code` 为 MODEL_TIMEOUT / MODEL_CONTEXT_LIMIT / MODEL_AUTH / MODEL_UNAVAILABLE，全部不自动重试。应用将这些端口错误映射成前述工作台状态，不把提供方原始异常暴露给用户或模型。
 
+QUERY-WINDOW-1.0在ProviderCategoryBatch增加兼容缺省的completeness、tool_coverage、error_code、diagnostic，约束详见窗口SDD；只有司法可发布带覆盖信息的partial批次，诊断不进入模型。
+
 ### BE-IF-03 搜索、确认与查询
 
 候选有效期到达或不属于本次所有者/搜索时拒绝确认；候选缺代码不可确认。确认只能来自明确选择，不存在单候选自动继续路径。`expected_generation` 与当前不一致返回冲突。
 
 确认切换时使旧代次任务结果不可写入新代次。所有查询绑定已选代码；返回记录若明确指向另一代码，整个对应类别失败。无可归属标识的记录仅在提供方明确绑定查询主体且适配器有可验证映射时接纳；不得仅靠相似名称归属。
 
-类别成功需计划内接口和分页全部完整；超过规定预算、返回结构非法、页数/总数不一致均为 error，而不是 empty。首版每类别最多 200 条、总接纳最多 200 条；超出时对应类别报限制错误而非静默选取前几条。旧版该类别证据保留原取得时间，成功重查以新完整集合替换该提供方类别证据，用户证据不删除。新旧相同提供方记录保留稳定定位，不制造重复事件。
+类别ok/empty需计划内接口和分页全部完整；司法partial可按已确认窗口接纳可靠子范围，并同步tool_coverage，其他类别不变。超过规定预算、返回结构非法、页数/总数不一致均为 error，而不是 empty。首版每类别最多 200 条、总接纳最多 200 条；超出时对应类别报限制错误而非静默选取前几条。旧版该类别证据保留原取得时间，成功重查以新完整集合替换该提供方类别证据，用户证据不删除。新旧相同提供方记录保留稳定定位，不制造重复事件。
 
 只有整体 empty 查询共享快照。已有用户编辑草稿时不覆盖其内容；可用快照提示与当前草稿分开。没有私人内容时预填充快照并维护服务端来源关联。
 

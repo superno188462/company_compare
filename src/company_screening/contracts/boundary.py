@@ -9,7 +9,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, Field, StrictBool, StringConstraints
 
 from .base import ContractModel
-from .generated import Category, HintCode, Subject, WorkflowPayload
+from .generated import Category, HintCode, QueryDiagnostic, Subject, ToolCoverage, WorkflowPayload
 
 CreditCode = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9ABCDEFGHJKLMNPQRTUWXY]{18}$")]
 SmallText = Annotated[str, StringConstraints(strict=True, min_length=1, max_length=256)]
@@ -226,10 +226,14 @@ class ProviderRecord(ContractModel):
 
 
 class ProviderCategoryBatch(ContractModel):
-    """完整成功的分类批次；不完整取得使用 ProviderError。"""
+    """分类批次；司法可声明有限范围，其他类别沿用完整批次契约。"""
 
     binding_credit_code: CreditCode = Field(description="有可验证查询映射的主体代码。")
     category: Category = Field(description="计划类别。")
     queried_at: AwareDatetime = Field(description="实际取得时间。")
     scope_description: Annotated[str, StringConstraints(strict=True, min_length=1, max_length=500)] = Field(description="实际接口及子范围，不夸大覆盖。")
-    records: list[ProviderRecord] = Field(max_length=200, description="完整记录集合；成功无记录为空列表。")
+    records: list[ProviderRecord] = Field(max_length=200, description="实际取得的完整记录；不截断单条正文，成功无记录为空列表。")
+    completeness: Literal["complete", "partial"] = Field(default="complete", description="QUERY-WINDOW-1.0：完整或明确有限范围的批次；旧适配器缺省完整。")
+    tool_coverage: list[ToolCoverage] = Field(default_factory=list, max_length=6, description="司法固定子工具的本轮取得范围，不包含原始错误或密钥。")
+    error_code: ProviderFailureCode | None = Field(default=None, description="部分批次中的第一个子工具错误；仅主动限制范围时为null。")
+    diagnostic: QueryDiagnostic | None = Field(default=None, description="首个失败子工具的受控诊断，仅服务端传递，不进入LLM。")

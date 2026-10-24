@@ -60,7 +60,21 @@ export type PlannedCategories =
  * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
  * via the `definition` "CategoryResult".
  */
-export type CategoryResult = OkCategoryResult | EmptyCategoryResult | ErrorCategoryResult | NotRequestedCategoryResult;
+export type CategoryResult =
+  OkCategoryResult | EmptyCategoryResult | ErrorCategoryResult | NotRequestedCategoryResult | PartialCategoryResult;
+/**
+ * 固定司法计划中的工具名，不包含其他业务工具。
+ *
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "JudicialToolName".
+ */
+export type JudicialToolName =
+  | "get_dishonest_info"
+  | "get_judgment_debtor_info"
+  | "get_high_consumption_restriction"
+  | "get_judicial_case"
+  | "get_judicial_documents"
+  | "get_court_notice";
 /**
  * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
  * via the `definition` "NullableTimestamp".
@@ -363,6 +377,44 @@ export interface OkCategoryResult {
    */
   scope_description: string;
   error_code: null;
+  /**
+   * 司法有限查询的子工具范围；旧结果缺省空数组，不据此推断历史覆盖。
+   *
+   * @maxItems 6
+   */
+  tool_coverage?:
+    | []
+    | [ToolCoverage]
+    | [ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage];
+}
+/**
+ * QUERY-WINDOW-1.0：本次司法子工具实际接纳范围，不是账户额度或风险评分。
+ *
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "ToolCoverage".
+ */
+export interface ToolCoverage {
+  tool_name: JudicialToolName;
+  /**
+   * 完整有记录、完整空、有限取得、子工具失败、预算内未请求；不混同无风险。
+   */
+  status: "complete" | "empty" | "partial" | "error" | "not_requested";
+  /**
+   * 本次实际接纳记录数，不是上游全部记录数。
+   */
+  accepted_count: number;
+  /**
+   * 上游声明的本工具总数；未知或不可信为null，不用于推算独立案件数。
+   */
+  total_count: number | null;
+  /**
+   * 已知仍有剩余为true，证明完整才为false，不确定为null。
+   */
+  has_more: boolean | null;
 }
 /**
  * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
@@ -377,6 +429,19 @@ export interface EmptyCategoryResult {
    */
   scope_description: string;
   error_code: null;
+  /**
+   * 司法有限查询的子工具范围；旧结果缺省空数组，不据此推断历史覆盖。
+   *
+   * @maxItems 6
+   */
+  tool_coverage?:
+    | []
+    | [ToolCoverage]
+    | [ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage];
 }
 /**
  * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
@@ -398,6 +463,19 @@ export interface ErrorCategoryResult {
     | "UPSTREAM_INVALID"
     | "UPSTREAM_INCOMPLETE"
     | "SUBJECT_RESPONSE_MISMATCH";
+  /**
+   * 司法有限查询的子工具范围；旧结果缺省空数组，不据此推断历史覆盖。
+   *
+   * @maxItems 6
+   */
+  tool_coverage?:
+    | []
+    | [ToolCoverage]
+    | [ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage];
 }
 /**
  * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
@@ -412,6 +490,56 @@ export interface NotRequestedCategoryResult {
    */
   scope_description: string;
   error_code: null;
+  /**
+   * 司法有限查询的子工具范围；旧结果缺省空数组，不据此推断历史覆盖。
+   *
+   * @maxItems 6
+   */
+  tool_coverage?:
+    | []
+    | [ToolCoverage]
+    | [ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage];
+}
+/**
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "PartialCategoryResult".
+ */
+export interface PartialCategoryResult {
+  status: "partial";
+  record_count: number;
+  queried_at: Timestamp;
+  /**
+   * 本类别实际接口/子范围及期间覆盖；不能把一个子接口说成全部司法/资产记录。
+   */
+  scope_description: string;
+  error_code:
+    | (
+        | "UPSTREAM_TIMEOUT"
+        | "UPSTREAM_AUTH"
+        | "UPSTREAM_LIMIT"
+        | "UPSTREAM_ERROR"
+        | "UPSTREAM_INVALID"
+        | "UPSTREAM_INCOMPLETE"
+        | "SUBJECT_RESPONSE_MISMATCH"
+      )
+    | null;
+  /**
+   * 司法有限查询的子工具范围；旧结果缺省空数组，不据此推断历史覆盖。
+   *
+   * @maxItems 6
+   */
+  tool_coverage?:
+    | []
+    | [ToolCoverage]
+    | [ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage]
+    | [ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage, ToolCoverage];
 }
 /**
  * 已确认主体后的完整工作台结果；搜索、草稿和进度响应的其他边界见后端 SDD。仅本地解析 input-schema.json 引用。
