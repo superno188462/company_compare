@@ -1,5 +1,7 @@
 # 共享契约与数据语义
 
+> COLLECTION-UI-1.0及COLLECTION-1.0 SDD、[COLLECTION-TYPE-1](collection-type-review.md)和装配补充已确认；新增167项契约测试已确认并通过，见[COLLECTION-TEST-1](collection-test-review.md)。新增独立[collection-schema.json](../../contracts/collection-schema.json)，离线生成浏览DTO；原输入/输出机器Schema保持不变，不把公共材料库或浏览诊断送入模型。Boundary前缀定义从原边界模型派生并由生成器核对，不另设可修改权威。当前采集服务及5个独立HTTP路由已启用；完整413项测试通过。
+
 > QUERY-WINDOW-1.0 增补及其类型/测试已分别确认，司法窗口已实现并验证。仅司法类别允许 `partial` 与 `tool_coverage`；可靠子范围可接纳且必须向模型说明未完成范围，其他类别维持完整取得规则。输入/输出Schema同步扩展，全包200条、单条4000字符及256 KiB输入不放宽；error/partial均允许同范围重查，含partial的整体状态为partial且不预填快照。部分子项失败时受控诊断留在工作流，不进入模型。具体约束以[司法窗口SDD](../backend/query-bounded-results.spec.md)优先于下文DATA-02原有完整类别语义。
 
 ## 基线

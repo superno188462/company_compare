@@ -133,6 +133,124 @@ export type HintCode =
   | "OPEN_OFFICIAL_MANUALLY"
   | "INTERNAL_ERROR";
 /**
+ * 提供方类别内稳定记录ID。
+ */
+export type RecordId = string;
+/**
+ * 实际取得内容，不静默截断。
+ */
+export type Content = string;
+/**
+ * 原记录中的明确主体代码，无则 null。
+ */
+export type RecordCreditCode = string | null;
+/**
+ * 来源中明确的事件时间/期间。
+ */
+export type EventTime = string | null;
+/**
+ * 原记录定位链接，不触发网页读取。
+ */
+export type SourceUrl = string | null;
+/**
+ * 原记录所称发布者。
+ */
+export type SourcePublisher = string | null;
+/**
+ * 提供方类别内稳定记录ID。
+ */
+export type RecordId1 = string;
+/**
+ * 实际取得内容，不静默截断。
+ */
+export type Content1 = string;
+/**
+ * 原记录中的明确主体代码，无则 null。
+ */
+export type RecordCreditCode1 = string | null;
+/**
+ * 来源中明确的事件时间/期间。
+ */
+export type EventTime1 = string | null;
+/**
+ * 原记录定位链接，不触发网页读取。
+ */
+export type SourceUrl1 = string | null;
+/**
+ * 原记录所称发布者。
+ */
+export type SourcePublisher1 = string | null;
+/**
+ * 稳定错误代码。
+ */
+export type Code =
+  | "INPUT_INVALID"
+  | "SUBJECT_UNCONFIRMED"
+  | "CANDIDATE_INVALID"
+  | "CREDIT_MISSING"
+  | "CREDIT_MISMATCH"
+  | "CREDIT_CONFLICT"
+  | "SNAPSHOT_CONFIRM_REQUIRED"
+  | "SNAPSHOT_UNAVAILABLE"
+  | "SHARE_REQUIREMENTS"
+  | "SESSION_EXPIRED"
+  | "RESOURCE_NOT_FOUND"
+  | "OPERATION_CONFLICT"
+  | "IDEMPOTENCY_CONFLICT"
+  | "UPSTREAM_TIMEOUT"
+  | "UPSTREAM_AUTH"
+  | "UPSTREAM_LIMIT"
+  | "UPSTREAM_ERROR"
+  | "UPSTREAM_INVALID"
+  | "UPSTREAM_INCOMPLETE"
+  | "SUBJECT_RESPONSE_MISMATCH"
+  | "INPUT_TOO_LARGE"
+  | "STORAGE_UNAVAILABLE"
+  | "INTERNAL_ERROR";
+/**
+ * 出错的请求字段名。
+ */
+export type Field = string;
+/**
+ * text-dict.validation 中的已有键。
+ */
+export type MessageKey =
+  | "input_invalid"
+  | "company_name_required"
+  | "company_name_length"
+  | "credit_code_format"
+  | "content_required"
+  | "content_length"
+  | "url_format"
+  | "future_time"
+  | "time_format"
+  | "share_fields_required"
+  | "snapshot_ack_required"
+  | "no_candidate_code"
+  | "evidence_limit"
+  | "draft_saved"
+  | "clipboard_failed";
+/**
+ * 就近字段提示。
+ */
+export type Fields = FieldIssue[];
+/**
+ * 是否允许用户重试，不代表自动重试。
+ */
+export type Retryable = boolean;
+/**
+ * 当前操作标识。
+ */
+export type OperationId = string;
+/**
+ * 所属会话标识。
+ */
+export type SessionId = string;
+/**
+ * 所属主体代次。
+ */
+export type SessionGeneration = number;
+/**
  * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
  * via the `definition` "NullableText".
  */
@@ -142,10 +260,59 @@ export type NullableText = string | null;
  * via the `definition` "SourceHint".
  */
 export type SourceHint = "SOURCE_TIANYAN" | "SOURCE_USER_OTHER" | "SOURCE_USER_SELF";
+/**
+ * 当前操作标识。
+ */
+export type OperationId1 = string;
+/**
+ * 所属会话标识。
+ */
+export type SessionId1 = string;
+/**
+ * 所属主体代次。
+ */
+export type SessionGeneration1 = number;
+/**
+ * 固定14个企业子工具，不允许任意代理。
+ *
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "CollectionToolName".
+ */
+export type CollectionToolName =
+  | "get_company_registration_info"
+  | "get_shareholder_info"
+  | "get_business_exception"
+  | "get_administrative_penalty"
+  | "get_dishonest_info"
+  | "get_judgment_debtor_info"
+  | "get_high_consumption_restriction"
+  | "get_judicial_case"
+  | "get_judicial_documents"
+  | "get_court_notice"
+  | "get_equity_freeze"
+  | "get_judicial_assistance"
+  | "get_chattel_mortgage_info"
+  | "get_land_mortgage_info";
+/**
+ * 非司法完整采集工具，共8项。
+ *
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "SnapshotToolName".
+ */
+export type SnapshotToolName =
+  | "get_company_registration_info"
+  | "get_shareholder_info"
+  | "get_business_exception"
+  | "get_administrative_penalty"
+  | "get_equity_freeze"
+  | "get_judicial_assistance"
+  | "get_chattel_mortgage_info"
+  | "get_land_mortgage_info";
 
 export interface GeneratedContractBundle {
   llm_input: LlmInput;
   workflow_payload: WorkflowPayload;
+  collection_contracts?: CollectionContractBundle;
 }
 /**
  * 仅允许受控主体、已接纳证据和查询覆盖。所有引用由本地注册表解析，不请求 schema 地址。跨字段业务约束见 specs/common/global_schema.md。
@@ -713,6 +880,967 @@ export interface SnapshotDraft {
   expires_at: Timestamp;
 }
 /**
+ * COLLECTION-1.0声明定义集合；不是单个API响应。所有引用只由本地注册表解析。
+ *
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "CollectionContractBundle".
+ */
+export interface CollectionContractBundle {
+  ProviderToolSnapshot?: ProviderToolSnapshot;
+  ProviderJudicialPage?: ProviderJudicialPage;
+  CollectedRecord?: CollectedRecord;
+  CollectionToolView?: CollectionToolView;
+  CollectionOverview?: CollectionOverview;
+  CollectionRecordsPage?: CollectionRecordsPage;
+  LoadCollectionPageCommand?: LoadCollectionPageCommand;
+  RefreshCollectionToolCommand?: RefreshCollectionToolCommand;
+  CollectionOperationView?: CollectionOperationView;
+}
+/**
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "ProviderToolSnapshot".
+ */
+export interface ProviderToolSnapshot {
+  /**
+   * 18 位大写统一社会信用代码；格式通过不证明已登记或材料真实。
+   */
+  binding_credit_code: string;
+  /**
+   * 完整采集的非司法工具。
+   */
+  tool_name:
+    | "get_company_registration_info"
+    | "get_shareholder_info"
+    | "get_business_exception"
+    | "get_administrative_penalty"
+    | "get_equity_freeze"
+    | "get_judicial_assistance"
+    | "get_chattel_mortgage_info"
+    | "get_land_mortgage_info";
+  /**
+   * 含时区的 RFC3339 时间；存储/比较统一 UTC，显示 Asia/Shanghai。
+   */
+  queried_at: string;
+  /**
+   * 单工具完整规范化结果，未查全必须失败。
+   *
+   * @maxItems 200
+   */
+  records: ProviderRecord[];
+}
+/**
+ * BE-IF-07：一条完整取得的规范化提供方记录。
+ *
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "BoundaryProviderRecord".
+ */
+export interface ProviderRecord {
+  record_id: RecordId;
+  content: Content;
+  record_credit_code: RecordCreditCode;
+  event_time: EventTime;
+  source_url: SourceUrl;
+  source_publisher: SourcePublisher;
+}
+/**
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "ProviderJudicialPage".
+ */
+export interface ProviderJudicialPage {
+  /**
+   * 18 位大写统一社会信用代码；格式通过不证明已登记或材料真实。
+   */
+  binding_credit_code: string;
+  /**
+   * 固定司法计划中的工具名，不包含其他业务工具。
+   */
+  tool_name:
+    | "get_dishonest_info"
+    | "get_judgment_debtor_info"
+    | "get_high_consumption_restriction"
+    | "get_judicial_case"
+    | "get_judicial_documents"
+    | "get_court_notice";
+  /**
+   * 上游页码，从1开始。
+   */
+  page_number: number;
+  /**
+   * 上游固定页大小20。
+   */
+  page_size: 20;
+  /**
+   * 含时区的 RFC3339 时间；存储/比较统一 UTC，显示 Asia/Shanghai。
+   */
+  queried_at: string;
+  /**
+   * 本页完整记录。
+   *
+   * @maxItems 20
+   */
+  records:
+    | []
+    | [ProviderRecord]
+    | [ProviderRecord, ProviderRecord]
+    | [ProviderRecord, ProviderRecord, ProviderRecord]
+    | [ProviderRecord, ProviderRecord, ProviderRecord, ProviderRecord]
+    | [ProviderRecord, ProviderRecord, ProviderRecord, ProviderRecord, ProviderRecord]
+    | [ProviderRecord, ProviderRecord, ProviderRecord, ProviderRecord, ProviderRecord, ProviderRecord]
+    | [ProviderRecord, ProviderRecord, ProviderRecord, ProviderRecord, ProviderRecord, ProviderRecord, ProviderRecord]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ]
+    | [
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord,
+        ProviderRecord
+      ];
+  /**
+   * 上游声明总数；未知null，不填0。
+   */
+  total_count: number | null;
+  /**
+   * 未知不证明无更多。
+   */
+  has_more: boolean | null;
+}
+/**
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "CollectedRecord".
+ */
+export interface CollectedRecord {
+  record_id: RecordId1;
+  content: Content1;
+  record_credit_code: RecordCreditCode1;
+  event_time: EventTime1;
+  source_url: SourceUrl1;
+  source_publisher: SourcePublisher1;
+  /**
+   * 材料稳定应用定位，不是报告引用ID。
+   */
+  record_key: string;
+  /**
+   * 18 位大写统一社会信用代码；格式通过不证明已登记或材料真实。
+   */
+  subject_credit_code: string;
+  /**
+   * 固定取得类别。
+   */
+  category: "basic" | "abnormal" | "penalty" | "judicial" | "asset";
+  /**
+   * 实际取得工具。
+   */
+  tool_name:
+    | "get_company_registration_info"
+    | "get_shareholder_info"
+    | "get_business_exception"
+    | "get_administrative_penalty"
+    | "get_dishonest_info"
+    | "get_judgment_debtor_info"
+    | "get_high_consumption_restriction"
+    | "get_judicial_case"
+    | "get_judicial_documents"
+    | "get_court_notice"
+    | "get_equity_freeze"
+    | "get_judicial_assistance"
+    | "get_chattel_mortgage_info"
+    | "get_land_mortgage_info";
+  /**
+   * 第三方聚合来源。
+   */
+  source: "tianyan";
+  /**
+   * 含时区的 RFC3339 时间；存储/比较统一 UTC，显示 Asia/Shanghai。
+   */
+  snapshot_time: string;
+  /**
+   * 官方原文未核验。
+   */
+  verification_status: "original_not_verified";
+}
+/**
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "CollectionToolView".
+ */
+export interface CollectionToolView {
+  /**
+   * 实际工具。
+   */
+  tool_name:
+    | "get_company_registration_info"
+    | "get_shareholder_info"
+    | "get_business_exception"
+    | "get_administrative_penalty"
+    | "get_dishonest_info"
+    | "get_judgment_debtor_info"
+    | "get_high_consumption_restriction"
+    | "get_judicial_case"
+    | "get_judicial_documents"
+    | "get_court_notice"
+    | "get_equity_freeze"
+    | "get_judicial_assistance"
+    | "get_chattel_mortgage_info"
+    | "get_land_mortgage_info";
+  /**
+   * 对应类别。
+   */
+  category: "basic" | "abnormal" | "penalty" | "judicial" | "asset";
+  /**
+   * 当前浏览绑定的成功批次。
+   */
+  batch_id: string | null;
+  /**
+   * 无成功批次为null。
+   */
+  batch_revision: number | null;
+  /**
+   * 材料覆盖状态，与最近一次更新失败分开。
+   */
+  state: "complete" | "empty" | "partial" | "error" | "not_requested";
+  /**
+   * 已保存去重材料数，可超过200。
+   */
+  collected_count: number;
+  /**
+   * 最近有效页上游声明总数。
+   */
+  total_count: number | null;
+  /**
+   * 上游是否还有页；未知null。
+   */
+  has_more: boolean | null;
+  /**
+   * 可查询的下一上游页；null不证明完整。
+   */
+  next_upstream_page: number | null;
+  /**
+   * 原最早取得时间。
+   */
+  first_fetched_at: Timestamp | null;
+  /**
+   * 原最晚取得时间。
+   */
+  last_fetched_at: Timestamp | null;
+  /**
+   * 当前工作台绑定此批次的方式。
+   */
+  obtained_from: "cache" | "live" | "none";
+  /**
+   * 报告证据包使用的批次。
+   */
+  report_batch_id: string | null;
+  /**
+   * 报告证据包实际纳入数量。
+   */
+  report_included_count: number;
+  /**
+   * 仅当前会话最近采集失败，不进公共存储或模型。
+   */
+  last_error: ErrorInfo | null;
+  /**
+   * 当前失败的脱敏诊断，不进模型。
+   */
+  diagnostic: QueryDiagnostic | null;
+  /**
+   * 本批次已知上游总数是否变化。
+   */
+  total_changed: boolean;
+}
+/**
+ * BE-ERR-01：脱敏、机器可读错误。
+ *
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "BoundaryErrorInfo".
+ */
+export interface ErrorInfo {
+  code: Code;
+  /**
+   * 全局提示字典键。
+   */
+  hint_id:
+    | "DISCLOSURE_LIMITED"
+    | "CONFIRM_SUBJECT"
+    | "SOURCE_TIANYAN"
+    | "SOURCE_USER_OTHER"
+    | "SOURCE_USER_SELF"
+    | "PARTIAL_COVERAGE"
+    | "QUERY_EMPTY"
+    | "QUERY_ERROR"
+    | "NO_EVIDENCE"
+    | "SNAPSHOT_UNVERIFIED"
+    | "SNAPSHOT_CONFIRM_REQUIRED"
+    | "SNAPSHOT_EXPIRED"
+    | "SNAPSHOT_QUERY_FAILED"
+    | "CREDIT_MISSING"
+    | "CREDIT_MISMATCH"
+    | "CREDIT_CONFLICT"
+    | "SOURCE_INFO_MISSING"
+    | "SHARE_FAILED"
+    | "SHARE_SAVED"
+    | "SHARE_WITHDRAWN"
+    | "EVIDENCE_SAVED"
+    | "REPORT_FAILED"
+    | "REPORT_INVALID"
+    | "REPORT_STALE"
+    | "SESSION_EXPIRED"
+    | "SUBJECT_CHANGED"
+    | "SEARCH_EMPTY"
+    | "SEARCH_FAILED"
+    | "DUPLICATE_PENDING"
+    | "OPERATION_CONFLICT"
+    | "SUBJECT_MISMATCH"
+    | "LIMIT_EXCEEDED"
+    | "OPEN_OFFICIAL_MANUALLY"
+    | "INTERNAL_ERROR";
+  fields: Fields;
+  retryable: Retryable;
+}
+/**
+ * 错误字段与固定文案键，不返回用户原始值。
+ *
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "BoundaryFieldIssue".
+ */
+export interface FieldIssue {
+  field: Field;
+  message_key: MessageKey;
+}
+/**
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "CollectionOverview".
+ */
+export interface CollectionOverview {
+  /**
+   * 当前会话定位，不是访问凭据。
+   */
+  session_id: string;
+  /**
+   * 人工确认主体代次。
+   */
+  session_generation: number;
+  /**
+   * 18 位大写统一社会信用代码；格式通过不证明已登记或材料真实。
+   */
+  subject_credit_code: string;
+  /**
+   * 当前工作台浏览视图单调修订。
+   */
+  collection_revision: number;
+  /**
+   * 恰好14项且工具唯一。
+   *
+   * @minItems 14
+   * @maxItems 14
+   */
+  tools: [
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView,
+    CollectionToolView
+  ];
+  /**
+   * 当前payload证据版本；无payload为null。
+   */
+  report_evidence_version: number | null;
+  /**
+   * 报告证据包总条数，含手工证据。
+   */
+  report_evidence_count: number;
+}
+/**
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "CollectionRecordsPage".
+ */
+export interface CollectionRecordsPage {
+  /**
+   * 当前会话定位，不是访问凭据。
+   */
+  session_id: string;
+  /**
+   * 人工确认主体代次。
+   */
+  session_generation: number;
+  /**
+   * 18 位大写统一社会信用代码；格式通过不证明已登记或材料真实。
+   */
+  subject_credit_code: string;
+  /**
+   * 当前工作台浏览视图单调修订。
+   */
+  collection_revision: number;
+  /**
+   * 所属工具。
+   */
+  tool_name:
+    | "get_company_registration_info"
+    | "get_shareholder_info"
+    | "get_business_exception"
+    | "get_administrative_penalty"
+    | "get_dishonest_info"
+    | "get_judgment_debtor_info"
+    | "get_high_consumption_restriction"
+    | "get_judicial_case"
+    | "get_judicial_documents"
+    | "get_court_notice"
+    | "get_equity_freeze"
+    | "get_judicial_assistance"
+    | "get_chattel_mortgage_info"
+    | "get_land_mortgage_info";
+  /**
+   * 当前工作台绑定批次。
+   */
+  batch_id: string;
+  /**
+   * 页面所属批次修订。
+   */
+  batch_revision: number;
+  /**
+   * 本地材料展示页，不是上游页。
+   */
+  page: number;
+  /**
+   * 本地展示固定每页20条。
+   */
+  page_size: 20;
+  /**
+   * 本页已保存材料，不触发上游。
+   *
+   * @maxItems 20
+   */
+  items:
+    | []
+    | [CollectedRecord]
+    | [CollectedRecord, CollectedRecord]
+    | [CollectedRecord, CollectedRecord, CollectedRecord]
+    | [CollectedRecord, CollectedRecord, CollectedRecord, CollectedRecord]
+    | [CollectedRecord, CollectedRecord, CollectedRecord, CollectedRecord, CollectedRecord]
+    | [CollectedRecord, CollectedRecord, CollectedRecord, CollectedRecord, CollectedRecord, CollectedRecord]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ]
+    | [
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord,
+        CollectedRecord
+      ];
+  /**
+   * 下一已存展示页，未知上游范围不体现在此字段。
+   */
+  next_page: number | null;
+}
+/**
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "LoadCollectionPageCommand".
+ */
+export interface LoadCollectionPageCommand {
+  /**
+   * 当前主体代次。
+   */
+  expected_generation: number;
+  /**
+   * 预期工作台浏览修订。
+   */
+  expected_collection_revision: number;
+  /**
+   * 固定司法计划中的工具名，不包含其他业务工具。
+   */
+  tool_name:
+    | "get_dishonest_info"
+    | "get_judgment_debtor_info"
+    | "get_high_consumption_restriction"
+    | "get_judicial_case"
+    | "get_judicial_documents"
+    | "get_court_notice";
+  /**
+   * 连续取页的已绑定批次。
+   */
+  batch_id: string;
+  /**
+   * 下一上游页；不可跳页。
+   */
+  page_number: number;
+}
+/**
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "RefreshCollectionToolCommand".
+ */
+export interface RefreshCollectionToolCommand {
+  /**
+   * 当前主体代次。
+   */
+  expected_generation: number;
+  /**
+   * 预期工作台浏览修订。
+   */
+  expected_collection_revision: number;
+  /**
+   * 本次主动更新一个工具。
+   */
+  tool_name:
+    | "get_company_registration_info"
+    | "get_shareholder_info"
+    | "get_business_exception"
+    | "get_administrative_penalty"
+    | "get_dishonest_info"
+    | "get_judgment_debtor_info"
+    | "get_high_consumption_restriction"
+    | "get_judicial_case"
+    | "get_judicial_documents"
+    | "get_court_notice"
+    | "get_equity_freeze"
+    | "get_judicial_assistance"
+    | "get_chattel_mortgage_info"
+    | "get_land_mortgage_info";
+  /**
+   * 当前批次；无成功资料为null。
+   */
+  expected_batch_id: string | null;
+}
+/**
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "CollectionOperationView".
+ */
+export interface CollectionOperationView {
+  operation_id: OperationId;
+  session_id: SessionId;
+  session_generation: SessionGeneration;
+  /**
+   * 浏览任务种类。
+   */
+  kind: "load_page" | "refresh_tool";
+  /**
+   * 任务状态。
+   */
+  state: "queued" | "running" | "succeeded" | "failed";
+  /**
+   * 成功终态的浏览概览。
+   */
+  result: CollectionOverview | null;
+  /**
+   * 失败终态的安全错误。
+   */
+  error: ErrorInfo | null;
+}
+/**
  * 当前失败类别到诊断的映射；成功、空、未查询类别不得保留旧诊断；旧payload可省略整个字段。
  *
  * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
@@ -720,4 +1848,15 @@ export interface SnapshotDraft {
  */
 export interface QueryDiagnostics {
   [k: string]: QueryDiagnostic;
+}
+/**
+ * BE-IF-06：长任务定位，不是读取权限凭据。
+ *
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "BoundaryOperationHandle".
+ */
+export interface OperationHandle {
+  operation_id: OperationId1;
+  session_id: SessionId1;
+  session_generation: SessionGeneration1;
 }

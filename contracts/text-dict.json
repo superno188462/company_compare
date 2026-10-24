@@ -1,5 +1,5 @@
 {
-  "version": "1.2.0",
+  "version": "1.3.0",
   "locale": "zh-CN",
   "app_name": "企业公开线索筛查",
   "hints": {
@@ -87,6 +87,33 @@
     "no_successful_report": "当前没有成功生成的报告",
     "official_sites": "官方公示网站",
     "official_copy_fallback": "如未打开新标签页，可复制官网地址后手动访问。"
+  },
+  "collection": {
+    "cache_used": "使用已保存的API资料",
+    "collected_at": "资料取得时间",
+    "not_live": "资料按标注时间取得，可主动更新",
+    "load_more": "继续查询下一页20条",
+    "read_next": "查看已收集下一页",
+    "refresh": "更新本项资料",
+    "browse_only": "新增浏览材料未纳入当前报告证据包",
+    "refresh_failed": "更新失败，保留上次资料",
+    "total_changed": "上游声明总数发生变化，跨页结果不代表同一时刻快照"
+  },
+  "collection_labels": {
+    "collected": "已收集材料", "report_count": "当前报告证据包", "record": "线索记录",
+    "manual": "本次接纳的用户线索", "count_note": "材料条目数；同一事件可能有多份材料。",
+    "previous": "上一页", "page": "展示页", "reload": "重新读取资料", "loading": "正在读取已收集材料…",
+    "browser_unavailable": "材料浏览暂不可用，以下仅为当前报告证据包。",
+    "no_records": "该次取得未返回记录，不代表当前没有风险。",
+    "not_requested": "当前没有已取得资料，可主动更新或手工补充。",
+    "partial": "未查全", "complete": "已取得当前可核对范围", "unknown": "未提供",
+    "ended_unknown": "当前可取得范围已结束，完整性未知。", "in_report": "已纳入当前报告证据包",
+    "open_official": "打开官方复核入口", "copy_official": "复制官网地址", "supplement": "补充线索",
+    "entitlement_retry": "权益更新后重新查询", "no_entitlement": "该数据项当前账号未获调用权益",
+    "land_note": "不动产登记资料需按属地规则向登记机构申请。",
+    "working": "正在处理所选资料…", "done": "资料已更新；报告证据包保持原范围。",
+    "pending": "处理结果暂未确认，请继续查看原任务状态。", "resume": "继续查看处理状态",
+    "failure": "资料操作未完成，已有材料和草稿保留。"
   },
   "query_diagnostics": {
     "show": "查看原因",

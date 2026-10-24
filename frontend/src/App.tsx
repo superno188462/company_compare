@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 
 import dictionary from "../../contracts/text-dict.json";
 import { ApiClientError, screeningApi } from "./api/client.js";
+import { collectionApi } from "./api/collection-client.js";
+import { CollectionWorkspace } from "./workspace/CollectionWorkspace.js";
 import {
-  CandidateList, CoveragePanel, EvidenceCard, ManualEvidenceForm, OfficialLinks,
+  CandidateList, CoveragePanel, ManualEvidenceForm, OfficialLinks,
   ReportPanel, SearchPanel, SubjectHeader,
 } from "./components/WorkspacePanels.js";
 import type {
@@ -95,6 +97,7 @@ export function App() {
   const [activeOperation, setActiveOperation] = useState<OperationHandle | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
+  const [collectionBusy, setCollectionBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [snapshotAcknowledged, setSnapshotAcknowledged] = useState(false);
@@ -126,7 +129,26 @@ export function App() {
 
     const poll = async () => {
       try {
-        const view = await screeningApi.getOperation(workspace.session_id, activeOperation.operation_id);
+        let view: OperationView;
+        try {
+          view = await screeningApi.getOperation(workspace.session_id, activeOperation.operation_id);
+        } catch (caught) {
+          if (!(caught instanceof ApiClientError) || caught.status !== 404) throw caught;
+          // 页面刷新后服务端活动句柄也可能属于独立的浏览任务。
+          const collection = await collectionApi.getCollectionOperation(workspace.session_id, activeOperation.operation_id);
+          if (cancelled) return;
+          if (collection.state === "queued" || collection.state === "running") {
+            setNotice({ tone: "info", text: dictionary.collection_labels.working });
+            timer = window.setTimeout(() => { void poll(); }, 2000);
+            return;
+          }
+          const restored = await screeningApi.restoreSession(workspace.session_id);
+          if (cancelled) return;
+          setWorkspace(restored); setActiveOperation(null);
+          setNotice({ tone: collection.state === "succeeded" ? "success" : "warning",
+            text: collection.state === "succeeded" ? dictionary.collection_labels.done : dictionary.collection_labels.failure });
+          return;
+        }
         if (cancelled) return;
         if (view.state === "queued" || view.state === "running") {
           setOperationPhase(view.phase);
@@ -244,7 +266,7 @@ export function App() {
 
   const handleSubmitEvidence = async () => {
     if (workspace === null || workspace.current_subject === null || workspace.payload === null
-      || localDraft === null || actionBusy || activeOperation !== null) return;
+      || localDraft === null || actionBusy || collectionBusy || activeOperation !== null) return;
     let pending = pendingSubmissionRef.current;
     if (pending === null) {
       const errors: FieldErrors = {};
@@ -300,7 +322,7 @@ export function App() {
   };
 
   const handleRetryQueries = async (categories: Category[]) => {
-    if (workspace === null || workspace.payload === null || actionBusy
+    if (workspace === null || workspace.payload === null || actionBusy || collectionBusy
       || activeOperation !== null || queryRetryBusyRef.current) return;
     const command: RetryQueryCommand = {
       expected_generation: workspace.session_generation, categories,
@@ -431,8 +453,14 @@ export function App() {
           <CoveragePanel
             coverage={payload.api_status}
             diagnostics={payload.api_status.query_diagnostics ?? {}}
-            busy={actionBusy || activeOperation !== null}
+            busy={actionBusy || collectionBusy || activeOperation !== null}
             onRetry={(categories) => { void handleRetryQueries(categories); }}
+            onSupplement={(category) => {
+              if (localDraft !== null && !hasDraftContent(localDraft) && workspace?.draft == null) handleDraftChange({ ...localDraft, category });
+              const section = document.getElementById("manual-title")?.closest("section");
+              section?.scrollIntoView({ behavior: "smooth", block: "start" });
+              section?.querySelector("textarea")?.focus({ preventScroll: true });
+            }}
           />
         )}
 
@@ -440,17 +468,28 @@ export function App() {
           <section className="panel evidence-panel" aria-labelledby="evidence-title">
             <div className="section-heading">
               <h2 id="evidence-title">{dictionary.labels.evidence}</h2>
-              <span className="muted">{payload?.evidence_list.length ?? 0} 条</span>
+              <span className="muted">{dictionary.collection_labels.report_count} {payload?.evidence_list.length ?? 0}</span>
             </div>
-            {payload === null || payload.evidence_list.length === 0 ? (
+            {workspace !== null && currentSubject !== null && payload !== null ? (
+              <CollectionWorkspace key={`${workspace.session_id}:${workspace.session_generation}`} workspace={workspace}
+                busy={actionBusy || activeOperation !== null || collectionBusy} onBusyChange={setCollectionBusy}
+                onSupplement={(category) => {
+                  if (localDraft !== null && !hasDraftContent(localDraft) && workspace.draft === null) handleDraftChange({ ...localDraft, category });
+                  const section = document.getElementById("manual-title")?.closest("section");
+                  section?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  section?.querySelector("textarea")?.focus({ preventScroll: true });
+                }} onExpired={() => {
+                  sessionStorage.removeItem(SESSION_STORAGE_KEY); workspaceInitialization = null;
+                  pendingSubmissionRef.current = null; pendingQueryRetryRef.current = null;
+                  setWorkspace(null); setLocalDraft(null); setActiveOperation(null); setCollectionBusy(false);
+                  setNotice({ tone: "warning", text: dictionary.hints.SESSION_EXPIRED.text });
+                  void initializeWorkspace().then(setWorkspace).catch((caught: unknown) => setNotice(errorNotice(caught)));
+                }} />
+            ) : (
               <div className="empty-content">
                 <span className="empty-symbol" aria-hidden="true">≡</span>
                 <h3>{currentSubject === null ? "等待确认企业主体" : "当前没有已接纳证据"}</h3>
                 <p>{currentSubject === null ? "确认后查看资料覆盖和逐条证据。" : dictionary.hints.NO_EVIDENCE.text}</p>
-              </div>
-            ) : (
-              <div className="evidence-list">
-                {payload.evidence_list.map((item) => <EvidenceCard key={item.evidence_id} evidence={item} />)}
               </div>
             )}
           </section>
@@ -472,7 +511,7 @@ export function App() {
               fromSnapshot={workspace?.draft?.from_snapshot_id !== null && workspace?.draft?.from_snapshot_id !== undefined}
               snapshotAcknowledged={snapshotAcknowledged}
               shareConsent={false}
-              busy={actionBusy || activeOperation !== null}
+              busy={actionBusy || collectionBusy || activeOperation !== null}
               fieldErrors={fieldErrors}
               onChange={handleDraftChange}
               onSaveDraft={() => { void handleSaveDraft(); }}

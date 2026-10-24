@@ -1,0 +1,1303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://company-screening.invalid/schemas/collection-schema.json",
+  "title": "CollectionContractBundle",
+  "description": "COLLECTION-1.0声明定义集合；不是单个API响应。所有引用只由本地注册表解析。",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "ProviderToolSnapshot": {
+      "$ref": "#/$defs/ProviderToolSnapshot"
+    },
+    "ProviderJudicialPage": {
+      "$ref": "#/$defs/ProviderJudicialPage"
+    },
+    "CollectedRecord": {
+      "$ref": "#/$defs/CollectedRecord"
+    },
+    "CollectionToolView": {
+      "$ref": "#/$defs/CollectionToolView"
+    },
+    "CollectionOverview": {
+      "$ref": "#/$defs/CollectionOverview"
+    },
+    "CollectionRecordsPage": {
+      "$ref": "#/$defs/CollectionRecordsPage"
+    },
+    "LoadCollectionPageCommand": {
+      "$ref": "#/$defs/LoadCollectionPageCommand"
+    },
+    "RefreshCollectionToolCommand": {
+      "$ref": "#/$defs/RefreshCollectionToolCommand"
+    },
+    "CollectionOperationView": {
+      "$ref": "#/$defs/CollectionOperationView"
+    }
+  },
+  "$defs": {
+    "BoundaryFieldIssue": {
+      "additionalProperties": false,
+      "description": "错误字段与固定文案键，不返回用户原始值。",
+      "properties": {
+        "field": {
+          "description": "出错的请求字段名。",
+          "title": "Field",
+          "type": "string"
+        },
+        "message_key": {
+          "description": "text-dict.validation 中的已有键。",
+          "enum": [
+            "input_invalid",
+            "company_name_required",
+            "company_name_length",
+            "credit_code_format",
+            "content_required",
+            "content_length",
+            "url_format",
+            "future_time",
+            "time_format",
+            "share_fields_required",
+            "snapshot_ack_required",
+            "no_candidate_code",
+            "evidence_limit",
+            "draft_saved",
+            "clipboard_failed"
+          ],
+          "title": "Message Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "message_key"
+      ],
+      "title": "FieldIssue",
+      "type": "object"
+    },
+    "BoundaryErrorInfo": {
+      "additionalProperties": false,
+      "description": "BE-ERR-01：脱敏、机器可读错误。",
+      "properties": {
+        "code": {
+          "description": "稳定错误代码。",
+          "enum": [
+            "INPUT_INVALID",
+            "SUBJECT_UNCONFIRMED",
+            "CANDIDATE_INVALID",
+            "CREDIT_MISSING",
+            "CREDIT_MISMATCH",
+            "CREDIT_CONFLICT",
+            "SNAPSHOT_CONFIRM_REQUIRED",
+            "SNAPSHOT_UNAVAILABLE",
+            "SHARE_REQUIREMENTS",
+            "SESSION_EXPIRED",
+            "RESOURCE_NOT_FOUND",
+            "OPERATION_CONFLICT",
+            "IDEMPOTENCY_CONFLICT",
+            "UPSTREAM_TIMEOUT",
+            "UPSTREAM_AUTH",
+            "UPSTREAM_LIMIT",
+            "UPSTREAM_ERROR",
+            "UPSTREAM_INVALID",
+            "UPSTREAM_INCOMPLETE",
+            "SUBJECT_RESPONSE_MISMATCH",
+            "INPUT_TOO_LARGE",
+            "STORAGE_UNAVAILABLE",
+            "INTERNAL_ERROR"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "hint_id": {
+          "$ref": "output-schema.json#/$defs/HintCode",
+          "description": "全局提示字典键。"
+        },
+        "fields": {
+          "description": "就近字段提示。",
+          "items": {
+            "$ref": "#/$defs/BoundaryFieldIssue"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "retryable": {
+          "description": "是否允许用户重试，不代表自动重试。",
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "hint_id",
+        "fields",
+        "retryable"
+      ],
+      "title": "ErrorInfo",
+      "type": "object",
+      "$comment": "Derived from company_screening.contracts.boundary.ErrorInfo; generation checks exact structural equivalence."
+    },
+    "BoundaryProviderRecord": {
+      "additionalProperties": false,
+      "description": "BE-IF-07：一条完整取得的规范化提供方记录。",
+      "properties": {
+        "record_id": {
+          "description": "提供方类别内稳定记录ID。",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Record Id",
+          "type": "string"
+        },
+        "content": {
+          "description": "实际取得内容，不静默截断。",
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "record_credit_code": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9ABCDEFGHJKLMNPQRTUWXY]{18}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "原记录中的明确主体代码，无则 null。",
+          "title": "Record Credit Code"
+        },
+        "event_time": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "来源中明确的事件时间/期间。",
+          "title": "Event Time"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "maxLength": 2048,
+              "pattern": "^https?://[^\\s]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "原记录定位链接，不触发网页读取。",
+          "title": "Source Url"
+        },
+        "source_publisher": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "原记录所称发布者。",
+          "title": "Source Publisher"
+        }
+      },
+      "required": [
+        "record_id",
+        "content",
+        "record_credit_code",
+        "event_time",
+        "source_url",
+        "source_publisher"
+      ],
+      "title": "ProviderRecord",
+      "type": "object",
+      "$comment": "Derived from company_screening.contracts.boundary.ProviderRecord; generation checks exact structural equivalence."
+    },
+    "BoundaryOperationHandle": {
+      "additionalProperties": false,
+      "description": "BE-IF-06：长任务定位，不是读取权限凭据。",
+      "properties": {
+        "operation_id": {
+          "description": "当前操作标识。",
+          "format": "uuid",
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "所属会话标识。",
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "session_generation": {
+          "description": "所属主体代次。",
+          "minimum": 1,
+          "title": "Session Generation",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operation_id",
+        "session_id",
+        "session_generation"
+      ],
+      "title": "OperationHandle",
+      "type": "object",
+      "$comment": "Derived from company_screening.contracts.boundary.OperationHandle; generation checks exact structural equivalence."
+    },
+    "CollectionToolName": {
+      "type": "string",
+      "enum": [
+        "get_company_registration_info",
+        "get_shareholder_info",
+        "get_business_exception",
+        "get_administrative_penalty",
+        "get_dishonest_info",
+        "get_judgment_debtor_info",
+        "get_high_consumption_restriction",
+        "get_judicial_case",
+        "get_judicial_documents",
+        "get_court_notice",
+        "get_equity_freeze",
+        "get_judicial_assistance",
+        "get_chattel_mortgage_info",
+        "get_land_mortgage_info"
+      ],
+      "description": "固定14个企业子工具，不允许任意代理。"
+    },
+    "SnapshotToolName": {
+      "type": "string",
+      "enum": [
+        "get_company_registration_info",
+        "get_shareholder_info",
+        "get_business_exception",
+        "get_administrative_penalty",
+        "get_equity_freeze",
+        "get_judicial_assistance",
+        "get_chattel_mortgage_info",
+        "get_land_mortgage_info"
+      ],
+      "description": "非司法完整采集工具，共8项。"
+    },
+    "ProviderToolSnapshot": {
+      "title": "ProviderToolSnapshot",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "binding_credit_code": {
+          "$ref": "input-schema.json#/$defs/CreditCode",
+          "description": "有可验证查询映射的主体代码。"
+        },
+        "tool_name": {
+          "$ref": "#/$defs/SnapshotToolName",
+          "description": "完整采集的非司法工具。"
+        },
+        "queried_at": {
+          "$ref": "input-schema.json#/$defs/Timestamp",
+          "description": "实际取得时间。"
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoundaryProviderRecord"
+          },
+          "maxItems": 200,
+          "description": "单工具完整规范化结果，未查全必须失败。"
+        }
+      },
+      "required": [
+        "binding_credit_code",
+        "tool_name",
+        "queried_at",
+        "records"
+      ]
+    },
+    "ProviderJudicialPage": {
+      "title": "ProviderJudicialPage",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "binding_credit_code": {
+          "$ref": "input-schema.json#/$defs/CreditCode",
+          "description": "查询绑定主体代码。"
+        },
+        "tool_name": {
+          "$ref": "input-schema.json#/$defs/JudicialToolName",
+          "description": "司法固定工具。"
+        },
+        "page_number": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "上游页码，从1开始。"
+        },
+        "page_size": {
+          "const": 20,
+          "description": "上游固定页大小20。"
+        },
+        "queried_at": {
+          "$ref": "input-schema.json#/$defs/Timestamp",
+          "description": "本页实际取得时间。"
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoundaryProviderRecord"
+          },
+          "maxItems": 20,
+          "description": "本页完整记录。"
+        },
+        "total_count": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "上游声明总数；未知null，不填0。"
+        },
+        "has_more": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "未知不证明无更多。"
+        }
+      },
+      "required": [
+        "binding_credit_code",
+        "tool_name",
+        "page_number",
+        "page_size",
+        "queried_at",
+        "records",
+        "total_count",
+        "has_more"
+      ]
+    },
+    "CollectedRecord": {
+      "title": "CollectedRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "record_id": {
+          "description": "提供方类别内稳定记录ID。",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Record Id",
+          "type": "string"
+        },
+        "content": {
+          "description": "实际取得内容，不静默截断。",
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "record_credit_code": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9ABCDEFGHJKLMNPQRTUWXY]{18}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "原记录中的明确主体代码，无则 null。",
+          "title": "Record Credit Code"
+        },
+        "event_time": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "来源中明确的事件时间/期间。",
+          "title": "Event Time"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "maxLength": 2048,
+              "pattern": "^https?://[^\\s]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "原记录定位链接，不触发网页读取。",
+          "title": "Source Url"
+        },
+        "source_publisher": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "原记录所称发布者。",
+          "title": "Source Publisher"
+        },
+        "record_key": {
+          "type": "string",
+          "description": "材料稳定应用定位，不是报告引用ID。",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "subject_credit_code": {
+          "$ref": "input-schema.json#/$defs/CreditCode",
+          "description": "已确认主体代码。"
+        },
+        "category": {
+          "$ref": "input-schema.json#/$defs/Category",
+          "description": "固定取得类别。"
+        },
+        "tool_name": {
+          "$ref": "#/$defs/CollectionToolName",
+          "description": "实际取得工具。"
+        },
+        "source": {
+          "const": "tianyan",
+          "description": "第三方聚合来源。"
+        },
+        "snapshot_time": {
+          "$ref": "input-schema.json#/$defs/Timestamp",
+          "description": "所属页实际取得时间，不因读取改变。"
+        },
+        "verification_status": {
+          "const": "original_not_verified",
+          "description": "官方原文未核验。"
+        }
+      },
+      "required": [
+        "record_id",
+        "content",
+        "record_credit_code",
+        "event_time",
+        "source_url",
+        "source_publisher",
+        "record_key",
+        "subject_credit_code",
+        "category",
+        "tool_name",
+        "source",
+        "snapshot_time",
+        "verification_status"
+      ]
+    },
+    "CollectionToolView": {
+      "title": "CollectionToolView",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tool_name": {
+          "$ref": "#/$defs/CollectionToolName",
+          "description": "实际工具。"
+        },
+        "category": {
+          "$ref": "input-schema.json#/$defs/Category",
+          "description": "对应类别。"
+        },
+        "batch_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "当前浏览绑定的成功批次。"
+        },
+        "batch_revision": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "无成功批次为null。"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "empty",
+            "partial",
+            "error",
+            "not_requested"
+          ],
+          "description": "材料覆盖状态，与最近一次更新失败分开。"
+        },
+        "collected_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "已保存去重材料数，可超过200。"
+        },
+        "total_count": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "最近有效页上游声明总数。"
+        },
+        "has_more": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "上游是否还有页；未知null。"
+        },
+        "next_upstream_page": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 2
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "可查询的下一上游页；null不证明完整。"
+        },
+        "first_fetched_at": {
+          "anyOf": [
+            {
+              "$ref": "input-schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "原最早取得时间。"
+        },
+        "last_fetched_at": {
+          "anyOf": [
+            {
+              "$ref": "input-schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "原最晚取得时间。"
+        },
+        "obtained_from": {
+          "type": "string",
+          "enum": [
+            "cache",
+            "live",
+            "none"
+          ],
+          "description": "当前工作台绑定此批次的方式。"
+        },
+        "report_batch_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "报告证据包使用的批次。"
+        },
+        "report_included_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200,
+          "description": "报告证据包实际纳入数量。"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundaryErrorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "仅当前会话最近采集失败，不进公共存储或模型。"
+        },
+        "diagnostic": {
+          "anyOf": [
+            {
+              "$ref": "output-schema.json#/$defs/QueryDiagnostic"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "当前失败的脱敏诊断，不进模型。"
+        },
+        "total_changed": {
+          "type": "boolean",
+          "description": "本批次已知上游总数是否变化。"
+        }
+      },
+      "required": [
+        "tool_name",
+        "category",
+        "batch_id",
+        "batch_revision",
+        "state",
+        "collected_count",
+        "total_count",
+        "has_more",
+        "next_upstream_page",
+        "first_fetched_at",
+        "last_fetched_at",
+        "obtained_from",
+        "report_batch_id",
+        "report_included_count",
+        "last_error",
+        "diagnostic",
+        "total_changed"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "category": {
+                "const": "basic"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "tool_name": {
+                "enum": [
+                  "get_company_registration_info",
+                  "get_shareholder_info"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "category": {
+                "const": "abnormal"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "tool_name": {
+                "enum": [
+                  "get_business_exception"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "category": {
+                "const": "penalty"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "tool_name": {
+                "enum": [
+                  "get_administrative_penalty"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "category": {
+                "const": "judicial"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "tool_name": {
+                "enum": [
+                  "get_dishonest_info",
+                  "get_judgment_debtor_info",
+                  "get_high_consumption_restriction",
+                  "get_judicial_case",
+                  "get_judicial_documents",
+                  "get_court_notice"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "category": {
+                "const": "asset"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "tool_name": {
+                "enum": [
+                  "get_equity_freeze",
+                  "get_judicial_assistance",
+                  "get_chattel_mortgage_info",
+                  "get_land_mortgage_info"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "batch_id": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "batch_revision": {
+                "type": "null"
+              },
+              "total_count": {
+                "type": "null"
+              },
+              "has_more": {
+                "type": "null"
+              },
+              "next_upstream_page": {
+                "type": "null"
+              },
+              "first_fetched_at": {
+                "type": "null"
+              },
+              "last_fetched_at": {
+                "type": "null"
+              },
+              "collected_count": {
+                "const": 0
+              },
+              "state": {
+                "enum": [
+                  "error",
+                  "not_requested"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "batch_id": {
+                "type": "string"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "batch_revision": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "first_fetched_at": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "last_fetched_at": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "empty"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "batch_id": {
+                "type": "string"
+              },
+              "collected_count": {
+                "const": 0
+              },
+              "total_count": {
+                "const": 0
+              },
+              "has_more": {
+                "const": false
+              },
+              "next_upstream_page": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "complete"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "batch_id": {
+                "type": "string"
+              },
+              "collected_count": {
+                "minimum": 1
+              },
+              "has_more": {
+                "const": false
+              },
+              "next_upstream_page": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "category": {
+                "enum": [
+                  "basic",
+                  "abnormal",
+                  "penalty",
+                  "asset"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "next_upstream_page": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "CollectionOverview": {
+      "title": "CollectionOverview",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "当前会话定位，不是访问凭据。"
+        },
+        "session_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "人工确认主体代次。"
+        },
+        "subject_credit_code": {
+          "$ref": "input-schema.json#/$defs/CreditCode",
+          "description": "已确认主体。"
+        },
+        "collection_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "当前工作台浏览视图单调修订。"
+        },
+        "tools": {
+          "type": "array",
+          "minItems": 14,
+          "maxItems": 14,
+          "items": {
+            "$ref": "#/$defs/CollectionToolView"
+          },
+          "description": "恰好14项且工具唯一。"
+        },
+        "report_evidence_version": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "当前payload证据版本；无payload为null。"
+        },
+        "report_evidence_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200,
+          "description": "报告证据包总条数，含手工证据。"
+        }
+      },
+      "required": [
+        "session_id",
+        "session_generation",
+        "subject_credit_code",
+        "collection_revision",
+        "tools",
+        "report_evidence_version",
+        "report_evidence_count"
+      ]
+    },
+    "CollectionRecordsPage": {
+      "title": "CollectionRecordsPage",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "当前会话定位，不是访问凭据。"
+        },
+        "session_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "人工确认主体代次。"
+        },
+        "subject_credit_code": {
+          "$ref": "input-schema.json#/$defs/CreditCode",
+          "description": "已确认主体。"
+        },
+        "collection_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "当前工作台浏览视图单调修订。"
+        },
+        "tool_name": {
+          "$ref": "#/$defs/CollectionToolName",
+          "description": "所属工具。"
+        },
+        "batch_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "当前工作台绑定批次。"
+        },
+        "batch_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "页面所属批次修订。"
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "本地材料展示页，不是上游页。"
+        },
+        "page_size": {
+          "const": 20,
+          "description": "本地展示固定每页20条。"
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/CollectedRecord"
+          },
+          "description": "本页已保存材料，不触发上游。"
+        },
+        "next_page": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 2
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "下一已存展示页，未知上游范围不体现在此字段。"
+        }
+      },
+      "required": [
+        "session_id",
+        "session_generation",
+        "subject_credit_code",
+        "collection_revision",
+        "tool_name",
+        "batch_id",
+        "batch_revision",
+        "page",
+        "page_size",
+        "items",
+        "next_page"
+      ]
+    },
+    "LoadCollectionPageCommand": {
+      "title": "LoadCollectionPageCommand",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expected_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "当前主体代次。"
+        },
+        "expected_collection_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "预期工作台浏览修订。"
+        },
+        "tool_name": {
+          "$ref": "input-schema.json#/$defs/JudicialToolName",
+          "description": "仅司法工具可继续查询。"
+        },
+        "batch_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "连续取页的已绑定批次。"
+        },
+        "page_number": {
+          "type": "integer",
+          "minimum": 2,
+          "description": "下一上游页；不可跳页。"
+        }
+      },
+      "required": [
+        "expected_generation",
+        "expected_collection_revision",
+        "tool_name",
+        "batch_id",
+        "page_number"
+      ]
+    },
+    "RefreshCollectionToolCommand": {
+      "title": "RefreshCollectionToolCommand",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expected_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "当前主体代次。"
+        },
+        "expected_collection_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "预期工作台浏览修订。"
+        },
+        "tool_name": {
+          "$ref": "#/$defs/CollectionToolName",
+          "description": "本次主动更新一个工具。"
+        },
+        "expected_batch_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "当前批次；无成功资料为null。"
+        }
+      },
+      "required": [
+        "expected_generation",
+        "expected_collection_revision",
+        "tool_name",
+        "expected_batch_id"
+      ]
+    },
+    "CollectionOperationView": {
+      "title": "CollectionOperationView",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "description": "当前操作标识。",
+          "format": "uuid",
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "所属会话标识。",
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "session_generation": {
+          "description": "所属主体代次。",
+          "minimum": 1,
+          "title": "Session Generation",
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "load_page",
+            "refresh_tool"
+          ],
+          "description": "浏览任务种类。"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "succeeded",
+            "failed"
+          ],
+          "description": "任务状态。"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CollectionOverview"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "成功终态的浏览概览。"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundaryErrorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "失败终态的安全错误。"
+        }
+      },
+      "required": [
+        "operation_id",
+        "session_id",
+        "session_generation",
+        "kind",
+        "state",
+        "result",
+        "error"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "succeeded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "error": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "error": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "result": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "queued",
+                  "running"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "type": "null"
+              },
+              "error": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

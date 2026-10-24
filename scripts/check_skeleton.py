@@ -22,6 +22,43 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # 用户2026-10-23确认首批测试后，逐函数实现并验证的明确范围。
 IMPLEMENTED = {
+    # COLLECTION-TEST-1与装配补充确认后逐函数实现；原用例及全部新增用例回归。
+    ("src/company_screening/collections.py", "_error"),
+    ("src/company_screening/collections.py", "CollectionService.__init__"),
+    ("src/company_screening/collections.py", "CollectionService._key"),
+    ("src/company_screening/collections.py", "CollectionService._state"),
+    ("src/company_screening/collections.py", "CollectionService._forget"),
+    ("src/company_screening/collections.py", "CollectionService._pages"),
+    ("src/company_screening/collections.py", "CollectionService._fetch"),
+    ("src/company_screening/collections.py", "CollectionService.overview"),
+    ("src/company_screening/collections.py", "CollectionService.records"),
+    ("src/company_screening/collections.py", "CollectionService._category_batch"),
+    ("src/company_screening/collections.py", "CollectionService._accept_projection"),
+    ("src/company_screening/collections.py", "CollectionService._snapshot_at"),
+    ("src/company_screening/collections.py", "CollectionService._start"),
+    ("src/company_screening/collections.py", "CollectionService._run"),
+    ("src/company_screening/collections.py", "CollectionService.load_page"),
+    ("src/company_screening/collections.py", "CollectionService.refresh_tool"),
+    ("src/company_screening/collections.py", "CollectionService.operation"),
+    ("src/company_screening/collection_clock.py", "utc_now"),
+    ("src/company_screening/services.py", "SessionService._begin_collection"),
+    ("src/company_screening/services.py", "SessionService._finish_collection"),
+    ("src/company_screening/adapters/collection_sqlite.py", "SqliteCollectionStore.__init__"),
+    ("src/company_screening/adapters/collection_sqlite.py", "SqliteCollectionStore.latest"),
+    ("src/company_screening/adapters/collection_sqlite.py", "SqliteCollectionStore.get_batch"),
+    ("src/company_screening/adapters/collection_sqlite.py", "SqliteCollectionStore.get_page"),
+    ("src/company_screening/adapters/collection_sqlite.py", "SqliteCollectionStore.commit"),
+    ("src/company_screening/adapters/collection_sqlite.py", "SqliteCollectionStore.claim"),
+    ("src/company_screening/adapters/collection_sqlite.py", "SqliteCollectionStore.finish"),
+    ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter.fetch_tool_snapshot"),
+    ("src/company_screening/adapters/tianyan_mcp.py", "TianyanMcpAdapter.fetch_judicial_page"),
+    ("backend/collection_routes.py", "get_collection_service"),
+    ("backend/collection_routes.py", "_check_write"),
+    ("backend/collection_routes.py", "get_collections"),
+    ("backend/collection_routes.py", "get_collection_records"),
+    ("backend/collection_routes.py", "load_collection_page"),
+    ("backend/collection_routes.py", "refresh_collection_tool"),
+    ("backend/collection_routes.py", "get_collection_operation"),
     ("src/company_screening/services.py", "_query_diagnostic"),
     ("src/company_screening/services.py", "SessionService._begin_query_retry"),
     ("src/company_screening/services.py", "SessionService.create"),
@@ -100,7 +137,31 @@ SERVICE_PARAMETERS = {
 PORT_PARAMETERS = {
     "CompanyDataPort.search": ["self", "command"],
     "CompanyDataPort.fetch_category": ["self", "subject", "category"],
+    "CompanyDataPort.fetch_tool_snapshot": ["self", "subject", "tool_name"],
+    "CompanyDataPort.fetch_judicial_page": ["self", "subject", "tool_name"],
+    "CollectionStorePort.latest": ["self", "key"],
+    "CollectionStorePort.get_batch": ["self", "key", "batch_id"],
+    "CollectionStorePort.get_page": ["self", "key", "batch_id", "page_number"],
+    "CollectionStorePort.commit": ["self", "batch", "page"],
+    "CollectionStorePort.claim": ["self", "request"],
+    "CollectionStorePort.finish": ["self", "claim_id"],
     "ReportModelPort.generate": ["self", "input", "system_prompt"],
+}
+
+COLLECTION_PARAMETERS = {
+    "CollectionService.overview": ["self", "actor", "sid"],
+    "CollectionService.records": ["self", "actor", "sid", "tool_name", "batch_id"],
+    "CollectionService.load_page": ["self", "actor", "sid", "command", "key"],
+    "CollectionService.refresh_tool": ["self", "actor", "sid", "command", "key"],
+    "CollectionService.operation": ["self", "actor", "sid", "opid"],
+}
+
+COLLECTION_ROUTES = {
+    ("GET", "/api/v1/sessions/{sid}/collections"),
+    ("GET", "/api/v1/sessions/{sid}/collections/{tool_name}/records"),
+    ("POST", "/api/v1/sessions/{sid}/collections/pages"),
+    ("POST", "/api/v1/sessions/{sid}/collections/refresh"),
+    ("GET", "/api/v1/sessions/{sid}/collection-operations/{opid}"),
 }
 
 EXPECTED_ROUTES = {
@@ -160,6 +221,18 @@ def check_signatures(relative: str, expected: dict[str, list[str]]) -> None:
                         assert len(node.args.kw_defaults) == 1
                         default = node.args.kw_defaults[0]
                         assert isinstance(default, ast.Constant) and default.value == 200
+                    if relative == "src/company_screening/ports.py" and node.name == "fetch_judicial_page":
+                        assert [arg.arg for arg in node.args.kwonlyargs] == ["page_number", "page_size"]
+                        assert node.args.kw_defaults[0] is None
+                        assert isinstance(node.args.kw_defaults[1], ast.Constant)
+                        assert node.args.kw_defaults[1].value == 20
+                    if relative == "src/company_screening/ports.py" and node.name == "commit":
+                        assert [arg.arg for arg in node.args.kwonlyargs] == ["claim_id", "expected_revision"]
+                        assert node.args.kw_defaults == [None, None]
+                    if relative == "src/company_screening/collections.py" and node.name == "records":
+                        assert [arg.arg for arg in node.args.kwonlyargs] == ["page"]
+                        assert isinstance(node.args.kw_defaults[0], ast.Constant)
+                        assert node.args.kw_defaults[0].value == 1
     assert actual == expected, (relative, actual)
 
 
@@ -205,15 +278,83 @@ def check_shared_models() -> None:
         raise AssertionError(f"Unexpected valid declaration: {cls.__name__}")
 
 
+def check_collection_declarations() -> None:
+    """COLLECTION-TYPE-1：只检查声明映射及Schema往返，不执行采集/存储业务。"""
+    from generate_contracts import boundary_projection
+
+    documents = [json.loads((ROOT / "contracts" / name).read_text(encoding="utf-8"))
+                 for name in ("input-schema.json", "output-schema.json", "collection-schema.json")]
+    registry = Registry().with_resources((doc["$id"], Resource.from_contents(doc)) for doc in documents)
+    collection = documents[-1]
+    Draft202012Validator.check_schema(collection)
+    for name, definition in boundary_projection().items():
+        assert collection["$defs"][name] == definition, name
+    for name in collection["properties"]:
+        schema = collection["$defs"][name]
+        model = getattr(generated, name)
+        assert set(model.model_fields) == set(schema["properties"]), name
+        assert {key for key, value in model.model_fields.items() if value.is_required()} == set(schema["required"]), name
+        assert all(value.description for value in model.model_fields.values()), name
+    tool_names = list(generated.CollectionToolName)
+    assert len(tool_names) == 14
+    groups = ("basic", "basic", "abnormal", "penalty", *(["judicial"] * 6), *(["asset"] * 4))
+    tools = [dict(tool_name=name.value, category=category, batch_id=None, batch_revision=None,
+                  state="not_requested", collected_count=0, total_count=None, has_more=None,
+                  next_upstream_page=None, first_fetched_at=None, last_fetched_at=None,
+                  obtained_from="none", report_batch_id=None, report_included_count=0,
+                  last_error=None, diagnostic=None, total_changed=False)
+             for name, category in zip(tool_names, groups, strict=True)]
+    uid = "11111111-1111-4111-8111-111111111111"
+    instance = dict(session_id=uid, session_generation=1, subject_credit_code="91310000MA1ABCDEF0",
+                    collection_revision=1, tools=tools, report_evidence_version=None, report_evidence_count=0)
+    schema = {"$ref": collection["$id"] + "#/$defs/CollectionOverview"}
+    validator = Draft202012Validator(schema, registry=registry, format_checker=FormatChecker())
+    validator.validate(instance)
+    model = generated.CollectionOverview.model_validate_json(json.dumps(instance))
+    validator.validate(json.loads(model.model_dump_json()))
+    routes = importlib.import_module("backend.collection_routes").router.routes
+    assert {(method, route.path) for route in routes for method in route.methods} == COLLECTION_ROUTES
+    dictionary = json.loads((ROOT / "contracts/text-dict.json").read_text(encoding="utf-8"))
+    assert set(dictionary["collection"]) == {
+        "cache_used", "collected_at", "not_live", "load_more", "read_next", "refresh",
+        "browse_only", "refresh_failed", "total_changed",
+    }
+
+
+def check_collection_wiring() -> None:
+    """COLLECTION-WIRING-1：已确认装配构造签名，不执行构造或存储业务。"""
+    expected = {
+        "src/company_screening/collections.py": ("CollectionService", ["self"],
+            ["session_service", "company_data", "store", "scope_id", "clock", "task_submitter"]),
+        "src/company_screening/adapters/collection_sqlite.py": ("SqliteCollectionStore", ["self", "database_path"], ["clock"]),
+    }
+    for relative, (class_name, positional, keyword) in expected.items():
+        tree = ast.parse((ROOT / relative).read_text(encoding="utf-8"))
+        cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == class_name)
+        init = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == "__init__")
+        assert [arg.arg for arg in init.args.args] == positional
+        assert [arg.arg for arg in init.args.kwonlyargs] == keyword
+    for relative, name in (("src/company_screening/services.py", "__init__"), ("backend/app.py", "create_app")):
+        tree = ast.parse((ROOT / relative).read_text(encoding="utf-8"))
+        node = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+                    and node.name == name and any(arg.arg == "collection_service" for arg in node.args.kwonlyargs))
+        position = next(i for i, arg in enumerate(node.args.kwonlyargs) if arg.arg == "collection_service")
+        default = node.args.kw_defaults[position]
+        assert isinstance(default, ast.Constant) and default.value is None
+
+
 def main() -> None:
     """只执行离线骨架检查，绝不调用占位业务方法。"""
     count = check_stub_bodies()
     check_signatures("src/company_screening/services.py", SERVICE_PARAMETERS)
     check_signatures("src/company_screening/ports.py", PORT_PARAMETERS)
+    check_signatures("src/company_screening/collections.py", COLLECTION_PARAMETERS)
     routes = importlib.import_module("backend.routes").router.routes
     actual_routes = {(method, route.path) for route in routes for method in route.methods}
     assert actual_routes == EXPECTED_ROUTES
     check_shared_models()
+    check_collection_declarations()
+    check_collection_wiring()
     dictionary = json.loads((ROOT / "contracts/text-dict.json").read_text(encoding="utf-8"))
     assert set(get_args(ValidationMessageKey)) == set(dictionary["validation"])
     assert {item.value for item in generated.HintCode} == set(dictionary["hints"])
@@ -224,8 +365,11 @@ def main() -> None:
     assert {item.value for item in generated.FieldModel if item.value is not None} == set(diagnostic_copy["fields"])
     for module in ("company_screening.contracts.boundary", "company_screening.services", "company_screening.ports", "company_screening.errors", "backend.app", "backend.dependencies", "backend.routes"):
         importlib.import_module(module)
-    print(f"Contract structure OK: {len(IMPLEMENTED)} implemented functions/methods; {count} NotImplementedError functions; 13 service signatures; 3 port signatures; 13 routes; shared model/Schema round-trips and dictionary keys.")
-    print("Implementation behavior requires pytest; real providers, LLM and full browser integration remain unverified.")
+    print(f"Contract structure OK: {len(IMPLEMENTED)} implemented functions/methods; {count} NotImplementedError functions; "
+          f"{len(SERVICE_PARAMETERS) + len(COLLECTION_PARAMETERS)} service signatures; {len(PORT_PARAMETERS)} port signatures; "
+          f"{len(EXPECTED_ROUTES)} legacy routes + {len(COLLECTION_ROUTES)} collection routes; "
+          "shared/collection declaration mappings, Schema round-trips and dictionary keys.")
+    print("Structure checks do not prove runtime behavior; see pytest and collection-browser-acceptance.md for verified scope. LLM is not connected.")
 
 
 if __name__ == "__main__":

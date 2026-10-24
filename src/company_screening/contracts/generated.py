@@ -399,6 +399,555 @@ class SnapshotStatus(StrEnum):
     error = 'error'
 
 
+class MessageKey(StrEnum):
+    """
+    text-dict.validation 中的已有键。
+    """
+
+    input_invalid = 'input_invalid'
+    company_name_required = 'company_name_required'
+    company_name_length = 'company_name_length'
+    credit_code_format = 'credit_code_format'
+    content_required = 'content_required'
+    content_length = 'content_length'
+    url_format = 'url_format'
+    future_time = 'future_time'
+    time_format = 'time_format'
+    share_fields_required = 'share_fields_required'
+    snapshot_ack_required = 'snapshot_ack_required'
+    no_candidate_code = 'no_candidate_code'
+    evidence_limit = 'evidence_limit'
+    draft_saved = 'draft_saved'
+    clipboard_failed = 'clipboard_failed'
+
+
+class BoundaryFieldIssue(ContractModel):
+    """
+    错误字段与固定文案键，不返回用户原始值。
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    field: Annotated[StrictStr, Field(description='出错的请求字段名。', title='Field')]
+    message_key: Annotated[
+        MessageKey,
+        Field(description='text-dict.validation 中的已有键。', title='Message Key'),
+    ]
+
+
+class Code(StrEnum):
+    """
+    稳定错误代码。
+    """
+
+    INPUT_INVALID = 'INPUT_INVALID'
+    SUBJECT_UNCONFIRMED = 'SUBJECT_UNCONFIRMED'
+    CANDIDATE_INVALID = 'CANDIDATE_INVALID'
+    CREDIT_MISSING = 'CREDIT_MISSING'
+    CREDIT_MISMATCH = 'CREDIT_MISMATCH'
+    CREDIT_CONFLICT = 'CREDIT_CONFLICT'
+    SNAPSHOT_CONFIRM_REQUIRED = 'SNAPSHOT_CONFIRM_REQUIRED'
+    SNAPSHOT_UNAVAILABLE = 'SNAPSHOT_UNAVAILABLE'
+    SHARE_REQUIREMENTS = 'SHARE_REQUIREMENTS'
+    SESSION_EXPIRED = 'SESSION_EXPIRED'
+    RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND'
+    OPERATION_CONFLICT = 'OPERATION_CONFLICT'
+    IDEMPOTENCY_CONFLICT = 'IDEMPOTENCY_CONFLICT'
+    UPSTREAM_TIMEOUT = 'UPSTREAM_TIMEOUT'
+    UPSTREAM_AUTH = 'UPSTREAM_AUTH'
+    UPSTREAM_LIMIT = 'UPSTREAM_LIMIT'
+    UPSTREAM_ERROR = 'UPSTREAM_ERROR'
+    UPSTREAM_INVALID = 'UPSTREAM_INVALID'
+    UPSTREAM_INCOMPLETE = 'UPSTREAM_INCOMPLETE'
+    SUBJECT_RESPONSE_MISMATCH = 'SUBJECT_RESPONSE_MISMATCH'
+    INPUT_TOO_LARGE = 'INPUT_TOO_LARGE'
+    STORAGE_UNAVAILABLE = 'STORAGE_UNAVAILABLE'
+    INTERNAL_ERROR = 'INTERNAL_ERROR'
+
+
+class BoundaryErrorInfo(ContractModel):
+    """
+    BE-ERR-01：脱敏、机器可读错误。
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    code: Annotated[Code, Field(description='稳定错误代码。', title='Code')]
+    hint_id: Annotated[HintCode, Field(description='全局提示字典键。')]
+    fields: Annotated[
+        list[BoundaryFieldIssue], Field(description='就近字段提示。', title='Fields')
+    ]
+    retryable: Annotated[
+        StrictBool,
+        Field(description='是否允许用户重试，不代表自动重试。', title='Retryable'),
+    ]
+
+
+class RecordCreditCode(RootModel[StrictStr]):
+    root: Annotated[
+        StrictStr,
+        Field(
+            description='原记录中的明确主体代码，无则 null。',
+            pattern='^[0-9ABCDEFGHJKLMNPQRTUWXY]{18}$',
+            title='Record Credit Code',
+        ),
+    ]
+
+
+class EventTime(RootModel[StrictStr]):
+    root: Annotated[
+        StrictStr,
+        Field(
+            description='来源中明确的事件时间/期间。',
+            max_length=256,
+            min_length=1,
+            title='Event Time',
+        ),
+    ]
+
+
+class SourceUrl(RootModel[StrictStr]):
+    root: Annotated[
+        StrictStr,
+        Field(
+            description='原记录定位链接，不触发网页读取。',
+            max_length=2048,
+            pattern='^https?://[^\\s]+$',
+            title='Source Url',
+        ),
+    ]
+
+
+class SourcePublisher(RootModel[StrictStr]):
+    root: Annotated[
+        StrictStr,
+        Field(
+            description='原记录所称发布者。',
+            max_length=256,
+            min_length=1,
+            title='Source Publisher',
+        ),
+    ]
+
+
+class BoundaryProviderRecord(ContractModel):
+    """
+    BE-IF-07：一条完整取得的规范化提供方记录。
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    record_id: Annotated[
+        StrictStr,
+        Field(
+            description='提供方类别内稳定记录ID。',
+            max_length=256,
+            min_length=1,
+            title='Record Id',
+        ),
+    ]
+    content: Annotated[
+        StrictStr,
+        Field(
+            description='实际取得内容，不静默截断。',
+            max_length=4000,
+            min_length=1,
+            title='Content',
+        ),
+    ]
+    record_credit_code: Annotated[
+        RecordCreditCode | None,
+        Field(
+            description='原记录中的明确主体代码，无则 null。',
+            title='Record Credit Code',
+        ),
+    ]
+    event_time: Annotated[
+        EventTime | None,
+        Field(description='来源中明确的事件时间/期间。', title='Event Time'),
+    ]
+    source_url: Annotated[
+        SourceUrl | None,
+        Field(description='原记录定位链接，不触发网页读取。', title='Source Url'),
+    ]
+    source_publisher: Annotated[
+        SourcePublisher | None,
+        Field(description='原记录所称发布者。', title='Source Publisher'),
+    ]
+
+
+class BoundaryOperationHandle(ContractModel):
+    """
+    BE-IF-06：长任务定位，不是读取权限凭据。
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    operation_id: Annotated[
+        UUID, Field(description='当前操作标识。', title='Operation Id')
+    ]
+    session_id: Annotated[UUID, Field(description='所属会话标识。', title='Session Id')]
+    session_generation: Annotated[
+        StrictInt, Field(description='所属主体代次。', ge=1, title='Session Generation')
+    ]
+
+
+class CollectionToolName(StrEnum):
+    """
+    固定14个企业子工具，不允许任意代理。
+    """
+
+    get_company_registration_info = 'get_company_registration_info'
+    get_shareholder_info = 'get_shareholder_info'
+    get_business_exception = 'get_business_exception'
+    get_administrative_penalty = 'get_administrative_penalty'
+    get_dishonest_info = 'get_dishonest_info'
+    get_judgment_debtor_info = 'get_judgment_debtor_info'
+    get_high_consumption_restriction = 'get_high_consumption_restriction'
+    get_judicial_case = 'get_judicial_case'
+    get_judicial_documents = 'get_judicial_documents'
+    get_court_notice = 'get_court_notice'
+    get_equity_freeze = 'get_equity_freeze'
+    get_judicial_assistance = 'get_judicial_assistance'
+    get_chattel_mortgage_info = 'get_chattel_mortgage_info'
+    get_land_mortgage_info = 'get_land_mortgage_info'
+
+
+class SnapshotToolName(StrEnum):
+    """
+    非司法完整采集工具，共8项。
+    """
+
+    get_company_registration_info = 'get_company_registration_info'
+    get_shareholder_info = 'get_shareholder_info'
+    get_business_exception = 'get_business_exception'
+    get_administrative_penalty = 'get_administrative_penalty'
+    get_equity_freeze = 'get_equity_freeze'
+    get_judicial_assistance = 'get_judicial_assistance'
+    get_chattel_mortgage_info = 'get_chattel_mortgage_info'
+    get_land_mortgage_info = 'get_land_mortgage_info'
+
+
+class ProviderToolSnapshot(ContractModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    binding_credit_code: Annotated[
+        CreditCode, Field(description='有可验证查询映射的主体代码。')
+    ]
+    tool_name: Annotated[SnapshotToolName, Field(description='完整采集的非司法工具。')]
+    queried_at: Annotated[Timestamp, Field(description='实际取得时间。')]
+    records: Annotated[
+        list[BoundaryProviderRecord],
+        Field(description='单工具完整规范化结果，未查全必须失败。', max_length=200),
+    ]
+
+
+class TotalCount(RootModel[StrictInt]):
+    root: Annotated[
+        StrictInt, Field(description='上游声明总数；未知null，不填0。', ge=0)
+    ]
+
+
+class ProviderJudicialPage(ContractModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    binding_credit_code: Annotated[CreditCode, Field(description='查询绑定主体代码。')]
+    tool_name: Annotated[JudicialToolName, Field(description='司法固定工具。')]
+    page_number: Annotated[StrictInt, Field(description='上游页码，从1开始。', ge=1)]
+    page_size: Annotated[Literal[20], Field(description='上游固定页大小20。')]
+    queried_at: Annotated[Timestamp, Field(description='本页实际取得时间。')]
+    records: Annotated[
+        list[BoundaryProviderRecord], Field(description='本页完整记录。', max_length=20)
+    ]
+    total_count: Annotated[
+        TotalCount | None, Field(description='上游声明总数；未知null，不填0。')
+    ]
+    has_more: Annotated[StrictBool | None, Field(description='未知不证明无更多。')]
+
+
+class CollectedRecord(ContractModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    record_id: Annotated[
+        StrictStr,
+        Field(
+            description='提供方类别内稳定记录ID。',
+            max_length=256,
+            min_length=1,
+            title='Record Id',
+        ),
+    ]
+    content: Annotated[
+        StrictStr,
+        Field(
+            description='实际取得内容，不静默截断。',
+            max_length=4000,
+            min_length=1,
+            title='Content',
+        ),
+    ]
+    record_credit_code: Annotated[
+        RecordCreditCode | None,
+        Field(
+            description='原记录中的明确主体代码，无则 null。',
+            title='Record Credit Code',
+        ),
+    ]
+    event_time: Annotated[
+        EventTime | None,
+        Field(description='来源中明确的事件时间/期间。', title='Event Time'),
+    ]
+    source_url: Annotated[
+        SourceUrl | None,
+        Field(description='原记录定位链接，不触发网页读取。', title='Source Url'),
+    ]
+    source_publisher: Annotated[
+        SourcePublisher | None,
+        Field(description='原记录所称发布者。', title='Source Publisher'),
+    ]
+    record_key: Annotated[
+        StrictStr,
+        Field(
+            description='材料稳定应用定位，不是报告引用ID。',
+            max_length=256,
+            min_length=1,
+        ),
+    ]
+    subject_credit_code: Annotated[CreditCode, Field(description='已确认主体代码。')]
+    category: Annotated[Category, Field(description='固定取得类别。')]
+    tool_name: Annotated[CollectionToolName, Field(description='实际取得工具。')]
+    source: Annotated[Literal['tianyan'], Field(description='第三方聚合来源。')]
+    snapshot_time: Annotated[
+        Timestamp, Field(description='所属页实际取得时间，不因读取改变。')
+    ]
+    verification_status: Annotated[
+        Literal['original_not_verified'], Field(description='官方原文未核验。')
+    ]
+
+
+class BatchRevision(RootModel[StrictInt]):
+    root: Annotated[StrictInt, Field(description='无成功批次为null。', ge=1)]
+
+
+class State(StrEnum):
+    """
+    材料覆盖状态，与最近一次更新失败分开。
+    """
+
+    complete = 'complete'
+    empty = 'empty'
+    partial = 'partial'
+    error = 'error'
+    not_requested = 'not_requested'
+
+
+class TotalCount1(RootModel[StrictInt]):
+    root: Annotated[StrictInt, Field(description='最近有效页上游声明总数。', ge=0)]
+
+
+class NextUpstreamPage(RootModel[StrictInt]):
+    root: Annotated[
+        StrictInt, Field(description='可查询的下一上游页；null不证明完整。', ge=2)
+    ]
+
+
+class ObtainedFrom(StrEnum):
+    """
+    当前工作台绑定此批次的方式。
+    """
+
+    cache = 'cache'
+    live = 'live'
+    none = 'none'
+
+
+class CollectionToolView(ContractModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    tool_name: Annotated[CollectionToolName, Field(description='实际工具。')]
+    category: Annotated[Category, Field(description='对应类别。')]
+    batch_id: Annotated[UUID | None, Field(description='当前浏览绑定的成功批次。')]
+    batch_revision: Annotated[
+        BatchRevision | None, Field(description='无成功批次为null。')
+    ]
+    state: Annotated[State, Field(description='材料覆盖状态，与最近一次更新失败分开。')]
+    collected_count: Annotated[
+        StrictInt, Field(description='已保存去重材料数，可超过200。', ge=0)
+    ]
+    total_count: Annotated[
+        TotalCount1 | None, Field(description='最近有效页上游声明总数。')
+    ]
+    has_more: Annotated[
+        StrictBool | None, Field(description='上游是否还有页；未知null。')
+    ]
+    next_upstream_page: Annotated[
+        NextUpstreamPage | None,
+        Field(description='可查询的下一上游页；null不证明完整。'),
+    ]
+    first_fetched_at: Annotated[Timestamp | None, Field(description='原最早取得时间。')]
+    last_fetched_at: Annotated[Timestamp | None, Field(description='原最晚取得时间。')]
+    obtained_from: Annotated[
+        ObtainedFrom, Field(description='当前工作台绑定此批次的方式。')
+    ]
+    report_batch_id: Annotated[UUID | None, Field(description='报告证据包使用的批次。')]
+    report_included_count: Annotated[
+        StrictInt, Field(description='报告证据包实际纳入数量。', ge=0, le=200)
+    ]
+    last_error: Annotated[
+        BoundaryErrorInfo | None,
+        Field(description='仅当前会话最近采集失败，不进公共存储或模型。'),
+    ]
+    diagnostic: Annotated[
+        QueryDiagnostic | None, Field(description='当前失败的脱敏诊断，不进模型。')
+    ]
+    total_changed: Annotated[
+        StrictBool, Field(description='本批次已知上游总数是否变化。')
+    ]
+
+
+class ReportEvidenceVersion(RootModel[StrictInt]):
+    root: Annotated[
+        StrictInt, Field(description='当前payload证据版本；无payload为null。', ge=0)
+    ]
+
+
+class CollectionOverview(ContractModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: Annotated[UUID, Field(description='当前会话定位，不是访问凭据。')]
+    session_generation: Annotated[
+        StrictInt, Field(description='人工确认主体代次。', ge=1)
+    ]
+    subject_credit_code: Annotated[CreditCode, Field(description='已确认主体。')]
+    collection_revision: Annotated[
+        StrictInt, Field(description='当前工作台浏览视图单调修订。', ge=1)
+    ]
+    tools: Annotated[
+        list[CollectionToolView],
+        Field(description='恰好14项且工具唯一。', max_length=14, min_length=14),
+    ]
+    report_evidence_version: Annotated[
+        ReportEvidenceVersion | None,
+        Field(description='当前payload证据版本；无payload为null。'),
+    ]
+    report_evidence_count: Annotated[
+        StrictInt, Field(description='报告证据包总条数，含手工证据。', ge=0, le=200)
+    ]
+
+
+class NextPage(RootModel[StrictInt]):
+    root: Annotated[
+        StrictInt,
+        Field(description='下一已存展示页，未知上游范围不体现在此字段。', ge=2),
+    ]
+
+
+class CollectionRecordsPage(ContractModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: Annotated[UUID, Field(description='当前会话定位，不是访问凭据。')]
+    session_generation: Annotated[
+        StrictInt, Field(description='人工确认主体代次。', ge=1)
+    ]
+    subject_credit_code: Annotated[CreditCode, Field(description='已确认主体。')]
+    collection_revision: Annotated[
+        StrictInt, Field(description='当前工作台浏览视图单调修订。', ge=1)
+    ]
+    tool_name: Annotated[CollectionToolName, Field(description='所属工具。')]
+    batch_id: Annotated[UUID, Field(description='当前工作台绑定批次。')]
+    batch_revision: Annotated[StrictInt, Field(description='页面所属批次修订。', ge=1)]
+    page: Annotated[StrictInt, Field(description='本地材料展示页，不是上游页。', ge=1)]
+    page_size: Annotated[Literal[20], Field(description='本地展示固定每页20条。')]
+    items: Annotated[
+        list[CollectedRecord],
+        Field(description='本页已保存材料，不触发上游。', max_length=20),
+    ]
+    next_page: Annotated[
+        NextPage | None,
+        Field(description='下一已存展示页，未知上游范围不体现在此字段。'),
+    ]
+
+
+class LoadCollectionPageCommand(ContractModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    expected_generation: Annotated[StrictInt, Field(description='当前主体代次。', ge=1)]
+    expected_collection_revision: Annotated[
+        StrictInt, Field(description='预期工作台浏览修订。', ge=1)
+    ]
+    tool_name: Annotated[JudicialToolName, Field(description='仅司法工具可继续查询。')]
+    batch_id: Annotated[UUID, Field(description='连续取页的已绑定批次。')]
+    page_number: Annotated[StrictInt, Field(description='下一上游页；不可跳页。', ge=2)]
+
+
+class RefreshCollectionToolCommand(ContractModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    expected_generation: Annotated[StrictInt, Field(description='当前主体代次。', ge=1)]
+    expected_collection_revision: Annotated[
+        StrictInt, Field(description='预期工作台浏览修订。', ge=1)
+    ]
+    tool_name: Annotated[
+        CollectionToolName, Field(description='本次主动更新一个工具。')
+    ]
+    expected_batch_id: Annotated[
+        UUID | None, Field(description='当前批次；无成功资料为null。')
+    ]
+
+
+class Kind(StrEnum):
+    """
+    浏览任务种类。
+    """
+
+    load_page = 'load_page'
+    refresh_tool = 'refresh_tool'
+
+
+class State1(StrEnum):
+    """
+    任务状态。
+    """
+
+    queued = 'queued'
+    running = 'running'
+    succeeded = 'succeeded'
+    failed = 'failed'
+
+
+class CollectionOperationView(ContractModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    operation_id: Annotated[
+        UUID, Field(description='当前操作标识。', title='Operation Id')
+    ]
+    session_id: Annotated[UUID, Field(description='所属会话标识。', title='Session Id')]
+    session_generation: Annotated[
+        StrictInt, Field(description='所属主体代次。', ge=1, title='Session Generation')
+    ]
+    kind: Annotated[Kind, Field(description='浏览任务种类。')]
+    state: Annotated[State1, Field(description='任务状态。')]
+    result: Annotated[
+        CollectionOverview | None, Field(description='成功终态的浏览概览。')
+    ]
+    error: Annotated[
+        BoundaryErrorInfo | None, Field(description='失败终态的安全错误。')
+    ]
+
+
 class Source(StrEnum):
     tianyan = 'tianyan'
     user_other = 'user_other'
@@ -752,6 +1301,43 @@ class PartialCategoryResult(ContractModel):
     ] = []
 
 
+class CollectionContractBundle(ContractModel):
+    """
+    COLLECTION-1.0声明定义集合；不是单个API响应。所有引用只由本地注册表解析。
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    ProviderToolSnapshot_1: Annotated[
+        ProviderToolSnapshot | None, Field(alias='ProviderToolSnapshot')
+    ] = None
+    ProviderJudicialPage_1: Annotated[
+        ProviderJudicialPage | None, Field(alias='ProviderJudicialPage')
+    ] = None
+    CollectedRecord_1: Annotated[
+        CollectedRecord | None, Field(alias='CollectedRecord')
+    ] = None
+    CollectionToolView_1: Annotated[
+        CollectionToolView | None, Field(alias='CollectionToolView')
+    ] = None
+    CollectionOverview_1: Annotated[
+        CollectionOverview | None, Field(alias='CollectionOverview')
+    ] = None
+    CollectionRecordsPage_1: Annotated[
+        CollectionRecordsPage | None, Field(alias='CollectionRecordsPage')
+    ] = None
+    LoadCollectionPageCommand_1: Annotated[
+        LoadCollectionPageCommand | None, Field(alias='LoadCollectionPageCommand')
+    ] = None
+    RefreshCollectionToolCommand_1: Annotated[
+        RefreshCollectionToolCommand | None, Field(alias='RefreshCollectionToolCommand')
+    ] = None
+    CollectionOperationView_1: Annotated[
+        CollectionOperationView | None, Field(alias='CollectionOperationView')
+    ] = None
+
+
 class PlannedCategories(RootModel[list[Category]]):
     root: Annotated[list[Category], Field(max_length=5, min_length=1)]
 
@@ -908,3 +1494,4 @@ class GeneratedContractBundle(ContractModel):
     )
     llm_input: LlmInput
     workflow_payload: WorkflowPayload
+    collection_contracts: CollectionContractBundle | None = None

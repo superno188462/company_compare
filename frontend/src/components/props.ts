@@ -33,6 +33,8 @@ export interface CoveragePanelProps {
   diagnostics?: QueryDiagnostics;
   /** 对error/partial重取同一范围；不是追加下一页。 */
   onRetry(categories: Category[]): void;
+  /** COL-FE-IF-04：就近进入手工补充；不覆盖已有草稿。 */
+  onSupplement?(category: Category): void;
 }
 
 export interface EvidenceCardProps {

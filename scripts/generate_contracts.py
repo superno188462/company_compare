@@ -1,4 +1,4 @@
-"""离线从两个权威 JSON Schema 生成 Python/TypeScript 声明。
+"""离线从本项目权威 JSON Schema 生成 Python/TypeScript 声明。
 
 这是开发工具，不是应用业务实现。条件约束保留在原 Schema；生成投影
 展开来源/分类状态的互斥分支，其他跨字段条件留待实现阶段按 SDD 验证。
@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def rewrite_refs(value: Any) -> Any:
-    """只重写本项目两个文件的引用，拒绝外部 schema 依赖。"""
+    """只重写本项目已注册文件的引用，拒绝外部 schema 依赖。"""
     if isinstance(value, list):
         return [rewrite_refs(item) for item in value]
     if not isinstance(value, dict):
@@ -27,12 +27,40 @@ def rewrite_refs(value: Any) -> Any:
     result = {key: rewrite_refs(item) for key, item in value.items()}
     if "$ref" in result:
         ref = result["$ref"]
-        for prefix in ("input-schema.json#/$defs/", "#/$defs/"):
+        for prefix in ("input-schema.json#/$defs/", "output-schema.json#/$defs/", "collection-schema.json#/$defs/", "#/$defs/"):
             if ref.startswith(prefix):
                 result["$ref"] = "#/definitions/" + ref[len(prefix) :]
                 break
         else:
             raise ValueError(f"Unexpected schema reference: {ref}")
+    return result
+
+
+def boundary_projection() -> dict[str, Any]:
+    """导出既有边界模型的派生声明，避免新增浏览Schema复制维护错误/记录字段。"""
+    from company_screening.contracts.boundary import ErrorInfo, OperationHandle, ProviderRecord
+
+    def prefixed(value: Any) -> Any:
+        if isinstance(value, list):
+            return [prefixed(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        result = {key: prefixed(item) for key, item in value.items()}
+        if "$ref" in result:
+            name = result["$ref"].split("/")[-1]
+            result["$ref"] = ("output-schema.json#/$defs/HintCode" if name == "HintCode"
+                              else f"#/$defs/Boundary{name}")
+        return result
+
+    result = {}
+    for model in (ErrorInfo, ProviderRecord, OperationHandle):
+        document = model.model_json_schema()
+        for name, definition in document.pop("$defs", {}).items():
+            if name != "HintCode":
+                result[f"Boundary{name}"] = prefixed(definition)
+        document["$comment"] = (f"Derived from company_screening.contracts.boundary.{model.__name__}; "
+                                "generation checks exact structural equivalence.")
+        result[f"Boundary{model.__name__}"] = prefixed(document)
     return result
 
 
@@ -77,8 +105,18 @@ def build_bundle() -> dict[str, Any]:
     """构造仅供代码生成的本地投影，原 JSON Schema 始终为权威。"""
     source = json.loads((ROOT / "contracts/input-schema.json").read_text(encoding="utf-8"))
     output = json.loads((ROOT / "contracts/output-schema.json").read_text(encoding="utf-8"))
+    collection = json.loads((ROOT / "contracts/collection-schema.json").read_text(encoding="utf-8"))
     definitions = copy.deepcopy(source["$defs"])
     definitions.update(copy.deepcopy(output["$defs"]))
+    for name, definition in boundary_projection().items():
+        if collection["$defs"].get(name) != definition:
+            raise ValueError(f"Derived boundary declaration has drifted: {name}")
+    if set(definitions) & set(collection["$defs"]):
+        raise ValueError("Collection definitions must not replace existing shared definitions")
+    definitions.update(copy.deepcopy(collection["$defs"]))
+    # 保留机器Schema的跨字段规则；声明投影不生成业务校验器。
+    for name in ("CollectionToolView", "CollectionOperationView"):
+        definitions[name].pop("allOf", None)
     # URI 格式的模型类型会让生成器丢失 HTTP pattern/maxLength；声明投影使用
     # 原有字符串约束，完整 URI 校验仍以原 JSON Schema 为准。
     definitions["HttpUrl"].pop("format")
@@ -97,7 +135,7 @@ def build_bundle() -> dict[str, Any]:
             **copy.deepcopy(definitions["QueryDiagnostics"]),
             **{key: value for key, value in diagnostics_property.items() if key != "$ref"},
         }
-    for name, document in (("LlmInput", source), ("WorkflowPayload", output)):
+    for name, document in (("LlmInput", source), ("WorkflowPayload", output), ("CollectionContractBundle", collection)):
         model = {key: copy.deepcopy(value) for key, value in document.items() if key not in {"$schema", "$id", "$defs", "allOf"}}
         model["title"] = name
         definitions[name] = model
@@ -110,6 +148,7 @@ def build_bundle() -> dict[str, Any]:
         "properties": {
             "llm_input": {"$ref": "#/$defs/LlmInput"},
             "workflow_payload": {"$ref": "#/$defs/WorkflowPayload"},
+            "collection_contracts": {"$ref": "#/$defs/CollectionContractBundle"},
         },
         "required": ["llm_input", "workflow_payload"],
     }

@@ -1,12 +1,14 @@
 """BE-IF-02：应用服务；会话、搜索、确认、分类查询编排与任务轮询已实现。"""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import hashlib
 import re
 from threading import RLock
-from typing import ClassVar
+from typing import ClassVar, TYPE_CHECKING
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -17,12 +19,15 @@ from .contracts.boundary import (
     ErrorCode, ErrorInfo, OperationView, RetryAnalysisCommand, RetryQueryCommand, SearchCommand, SearchResult,
     SessionExpiry, SubmitEvidenceCommand, WithdrawalResult, WorkspaceState,
 )
-from .errors import ApplicationError, ProviderError
+from .errors import ApplicationError, ProviderError, StorageError
 from .contracts.generated import (
     Category, CategoryResults, HintCode, JudicialToolName, LlmStatus, NullableText,
     QueryDiagnostic, Subject, WorkflowPayload,
 )
 from .ports import CompanyDataPort
+
+if TYPE_CHECKING:
+    from .collections import CollectionService
 
 
 CATEGORY_ERROR_SCOPE = {
@@ -56,6 +61,7 @@ class SessionService:
     _sessions: ClassVar[dict[UUID, tuple[UUID, WorkspaceState]]] = {}
     _ended: ClassVar[dict[UUID, UUID]] = {}
     _lock: ClassVar[RLock] = RLock()
+    _collection_cleanup: Callable[[UUID], None] | None = None
 
     def create(self, actor: ActorContext) -> WorkspaceState:
         """BE-IF-01 / DATA-05：显式创建私有会话。"""
@@ -87,7 +93,9 @@ class SessionService:
                                  fields=[], retryable=False)
             error = ApplicationError(info.code)
             error.info = info
-            raise error
+        if info.code == "SESSION_EXPIRED" and self._collection_cleanup is not None:
+            self._collection_cleanup(sid)
+        raise error
 
     def activity(self, actor: ActorContext, sid: UUID) -> SessionExpiry:
         """BE-NFR-02：只为明确用户活动续期。"""
@@ -121,6 +129,8 @@ class SessionService:
             self.restore(actor, sid)
             del self._sessions[sid]
             self._ended[sid] = actor.actor_id
+        if self._collection_cleanup is not None:
+            self._collection_cleanup(sid)
 
     def _confirm_subject(
         self,
@@ -211,6 +221,32 @@ class SessionService:
             )
             self._sessions[sid] = (actor.actor_id, state.model_copy(update={"active_operation": handle}))
             return handle, state.current_subject
+
+    def _begin_collection(
+        self, actor: ActorContext, sid: UUID, generation: int, operation_id: UUID,
+    ) -> OperationHandle:
+        """COL-IF-06：浏览写任务与报告任务使用同一会话互斥守卫。"""
+        with self._lock:
+            state = self.restore(actor, sid)
+            if state.session_generation != generation or state.active_operation is not None:
+                info = ErrorInfo(code="OPERATION_CONFLICT", hint_id=HintCode.OPERATION_CONFLICT, fields=[], retryable=False)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error
+            handle = OperationHandle(operation_id=operation_id, session_id=sid, session_generation=generation)
+            self._sessions[sid] = (actor.actor_id, state.model_copy(update={"active_operation": handle}))
+            return handle
+
+    def _finish_collection(self, actor: ActorContext, handle: OperationHandle) -> None:
+        """COL-IF-06：只释放当前代次本浏览任务，不改报告、证据或新草稿。"""
+        with self._lock:
+            try:
+                state = self.restore(actor, handle.session_id)
+            except ApplicationError:
+                return
+            if (state.session_generation == handle.session_generation and state.active_operation is not None
+                    and state.active_operation.operation_id == handle.operation_id):
+                self._sessions[handle.session_id] = (actor.actor_id, state.model_copy(update={"active_operation": None}))
 
     def _complete_operation(
         self,
@@ -500,12 +536,14 @@ class ScreeningService:
         company_data: CompanyDataPort | None = None,
         clock: Callable[[], datetime] | None = None,
         task_submitter: Callable[[Callable[[], None]], object] | None = None,
+        collection_service: CollectionService | None = None,
     ) -> None:
         """注入会话和提供方端口；缺少真实端口时不使用合成数据兜底。"""
         self._session_service = session_service or SessionService()
         self._company_data = company_data
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._task_submitter = task_submitter or self._query_executor.submit
+        self._collection_service = collection_service
 
     def search(self, actor: ActorContext, sid: UUID, command: SearchCommand, key: UUID) -> SearchResult:
         """BE-IF-03：仅返回候选，不自动确认。"""
@@ -781,6 +819,8 @@ class ScreeningService:
                 if category == Category.judicial:
                     record_budget = min(120, 200 - len(retained_rows))
                     if record_budget <= 0:
+                        if self._collection_service is not None:
+                            self._collection_service._category_batch(actor, handle.session_id, subject, category, record_limit=0)
                         capacity_error = ProviderError("No evidence capacity for judicial window")
                         capacity_error.code, capacity_error.retryable = "UPSTREAM_INCOMPLETE", False
                         capacity_error.diagnostic = _query_diagnostic(
@@ -788,10 +828,15 @@ class ScreeningService:
                             actual_count=len(retained_rows), limit_count=200,
                         )
                         raise capacity_error
-                    batch = self._company_data.fetch_category(subject, category, record_limit=record_budget)
+                    batch = (self._collection_service._category_batch(actor, handle.session_id, subject, category,
+                             record_limit=record_budget, bypass=retry_categories is not None)
+                             if self._collection_service is not None else
+                             self._company_data.fetch_category(subject, category, record_limit=record_budget))
                 else:
                     record_budget = 200
-                    batch = self._company_data.fetch_category(subject, category)
+                    batch = (self._collection_service._category_batch(actor, handle.session_id, subject, category,
+                             bypass=retry_categories is not None) if self._collection_service is not None else
+                             self._company_data.fetch_category(subject, category))
                 if batch.category != category:
                     provider_failure = ProviderError("Provider category does not match query")
                     provider_failure.code, provider_failure.retryable = "UPSTREAM_INVALID", False
@@ -896,7 +941,8 @@ class ScreeningService:
                         "category": category.value,
                         "content": record.content,
                         "source": "tianyan",
-                        "snapshot_time": batch.queried_at,
+                        "snapshot_time": (self._collection_service._snapshot_at(actor, handle.session_id, category, record.record_id, batch.queried_at)
+                                          if self._collection_service is not None else batch.queried_at),
                         "captured_at": self._clock(),
                         "event_time": record.event_time,
                         "source_url": record.source_url,
@@ -909,6 +955,8 @@ class ScreeningService:
                     })
                 # 仅接纳已校验的批次，司法窗口将未取得范围同时发布；用户来源始终保留。
                 evidence_rows = [*retained_rows, *category_evidence]
+                if self._collection_service is not None:
+                    self._collection_service._accept_projection(actor, handle.session_id, category)
                 category_results[category.value] = {
                     "status": "partial" if batch.completeness == "partial" else "ok" if batch.records else "empty",
                     "record_count": len(batch.records),
@@ -922,6 +970,11 @@ class ScreeningService:
                         QueryDiagnostic.model_validate(batch.diagnostic.model_dump(mode="python"))
                         if batch.diagnostic is not None else _query_diagnostic()
                     )
+            except StorageError:
+                info = ErrorInfo(code="STORAGE_UNAVAILABLE", hint_id=HintCode.INTERNAL_ERROR, fields=[], retryable=True)
+                error = ApplicationError(info.code)
+                error.info = info
+                raise error from None
             except ProviderError as exc:
                 try:
                     detail = (QueryDiagnostic.model_validate(exc.diagnostic.model_dump(mode="python"))

@@ -12,9 +12,13 @@
 
 ## 现在做到哪里
 
+共享API资料库与分页浏览已实现，完整413项测试通过（新增167项，原246项文件及断言不变）。需求/UI、SDD、类型、装配、契约测试及主体夹具纠错均已获用户确认；详见[测试评审与实施记录](specs/common/collection-test-review.md)和[实际验收范围](specs/common/collection-browser-acceptance.md)。
+
 **前端采用 React + TypeScript + Vite，已接通当前后端主线。** 页面会创建或恢复匿名会话，可搜索候选、要求用户点击确认主体、轮询五类查询任务、展示覆盖情况/证据/报告，并保存、清空或提交私有手工草稿。失败类别旁有“重新查询”按钮，只重试该类别，保留已有证据和草稿，查询期间禁止重复点击。“查看原因”可展开已知的失败子接口、HTTP状态、失败环节、相关字段和处理上限；未知信息标为未记录，旧结果需重新查询后才能取得新诊断。提交时核对主体、来源与版本，合法线索才进入证据包，重复请求只接纳一次；官网通过新标签页打开。共享发布和模型重试仍待实现。模型服务尚未接入，因此接纳后的完整结果明确显示报告失败，已经保存的证据保留，不生成合成报告。
 
-已实现范围的246项契约用例全部通过；本批41项司法窗口用例及对应SDD/类型已获用户分别确认，明细见[验收场景](tests/test-cases.md)。股东多来源同值ID已修复；司法固定六项各取首批最多20条，有数据但未查全时显示“部分取得”，展开“查看取得范围”可核对每项接纳数、上游总数及剩余情况。重查同一范围，不自动追加下一页或跑完数千条。诊断不保存上游原文、凭据或企业正文，不进入LLM证据包；无需新密钥或新增依赖。当前会话、搜索结果、任务状态、草稿、诊断和幂等记录只保存在单进程内存中，重启会丢失，持久化、自动清理和多实例一致性尚未完成。
+线索按类别、工具、单条默认折叠。司法固定六项先各取最多20条；有更多时可对所选工具点击“继续查询下一页20条”，已保存的下一页只读本地，不重复请求上游。初次出现60条只是三个工具各返回20条，不是浏览总上限。页面分别标注已收集条数、上游总数、未查全范围和报告证据包数量；浏览更多材料或主动更新不会偷偷改写报告。报告输入仍限200条及256 KiB。
+
+同公司API资料以SQLite保存，跨用户复用、不自动过期，始终保留原取得时间。新工作台选择最近成功批次；已打开的工作台保持自己的批次。主动更新成功创建新批次，失败保留旧资料。私人草稿、已接纳手工线索、报告、诊断及密钥不进入公共资料库。私人会话、搜索、任务及草稿仍在单进程内存中，重启需重新搜索并确认主体；公共API资料保留。会话闲置24小时失效，不把它当作公共资料的有效期。当前适用于单后端进程；多实例私有会话一致性及完整定时清理仍未交付。
 
 天眼查接入采用官方 MCP Shared Core，不使用旧版搜索 URL。把 `.env.example` 复制为 `.env`，在 `TYC_AUTHORIZATION` 中填写天眼 AI 页面生成的 MCP API Key。`.env` 已被 Git 忽略，密钥不得写入前端、日志、测试或提交记录。
 
@@ -31,6 +35,7 @@
 | 开发时核对接口与约束 | [后端规格](specs/backend/screening.spec.md)、[前端规格](specs/frontend/workspace.spec.md) |
 | 查询失败原因字段与安全边界 | [诊断规格DIAG-1.0](specs/backend/query-diagnostics.spec.md) |
 | 司法首批结果与会员/官网替代途径 | [司法窗口规格](specs/backend/query-bounded-results.spec.md)、[MCP实时核验与官方复核入口](specs/research/mcp-live-audit.md) |
+| API共享资料库、分页与更新 | [后端规格](specs/backend/collection-cache.spec.md)、[前端规格](specs/frontend/collection-browser.spec.md)、[浏览Schema](contracts/collection-schema.json) |
 | 验收与当前骨架状态 | [验收场景](tests/test-cases.md)、[骨架检查记录](specs/common/skeleton-review.md) |
 
 代码目录：
@@ -63,7 +68,15 @@ uv sync --locked
 uv run uvicorn backend.app:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-接口文档：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)。当前可查看13个HTTP接口契约；会话、候选搜索、人工确认和 `GET /api/v1/sessions/{sid}/operations/{opid}` 已可调用。确认后后台依次执行 `basic / abnormal / penalty / judicial / asset`，轮询只在终态返回完整 payload。搜索和详情查询要求服务端 `.env` 配置有效的 `TYC_AUTHORIZATION`。除司法窗口外，各类别仍要求固定子工具和分页完整；司法允许明确标注的有界部分结果，不使用合成数据兜底。2026-10-24当前Key被实时目录识别为VIP，真实工商验证取得3条，司法首批取得60条（案件20/5564、文书20/439、公告20/330），只能说明该次样例成功，不保证所有公司/工具覆盖。资产此前403不能改写为无记录；不购买SVIP时，可在工作台官方入口人工复核股权公示、中登网动产担保及执行线索，再手工录入。土地/房屋登记按属地查询条件办理，不能承诺公开查全。
+接口文档：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)。当前18项HTTP操作：原13项及5项材料概览/本地分页/司法下一页/单项更新/独立任务轮询。确认主体后后台依次取得五类资料，成功缓存优先复用，轮询在终态返回完整payload。搜索及新取资料要求服务端配置有效的 `TYC_AUTHORIZATION`。非司法工具仍要求完整取得；司法允许明确标范围的部分结果。真实接口已最小核实司法案件第2页取得20条、上游总数5564；其余五项第二页仅经过合成契约测试，不能保证每家企业或每项权限可用。
+
+确定无权益的数据项会显示说明，并提供官方复核入口、复制地址和手工补充；未知403不猜测是余额还是套餐。不购买SVIP仍可人工核对股权公示、中登网担保及执行线索；土地/房屋登记按属地条件办理，不能承诺查全。应用不抓取、读取或代理官网。
+
+## 资料保存与配置
+
+默认数据库为项目内 `.local/collections.sqlite3`，目录已被Git忽略。可在服务端配置 `COLLECTION_DATABASE_PATH` 指向可写的持久目录；首次启动自动建立新表，不迁移或删除旧会话。公共缓存键区分主体、工具、分页参数、规范化版本及凭据作用域；更换Key会隔离缓存，同一Key权益范围变化可递增 `COLLECTION_SCOPE_VERSION`。实际Key不写入数据库。
+
+需要备份或更改路径时先停止后端，再复制完整数据库；保留原文件便于恢复。回滚代码不自动删除缓存，旧版本不会读取新增资料库。存储故障明确报错，更新失败不以空结果替换旧资料；无自动过期不等于内容实时准确，使用前核对标注时间并按需更新。
 
 ## 开发检查
 
@@ -78,6 +91,6 @@ npm --prefix frontend run typecheck
 npm --prefix frontend run build
 ```
 
-`contracts/` 中两个 JSON Schema 是字段定义的权威来源；生成类型由 `uv run python scripts/generate_contracts.py` 更新，不手改 `generated.py` 或 `generated.ts`。共享行为语义见 [global_schema.md](specs/common/global_schema.md)。
+`contracts/` 中输入/输出 JSON Schema 定义既有报告字段，新增 `collection-schema.json` 定义浏览字段；生成类型由 `uv run python scripts/generate_contracts.py` 离线更新，不手改 `generated.py` 或 `generated.ts`。浏览Schema中的Boundary前缀定义是既有边界模型的派生投影，生成器检查与原类型一致，不能独立改字段。共享行为语义见 [global_schema.md](specs/common/global_schema.md)。
 
-上述命令检查契约结构与类型，不能证明全流程可用。契约测试单独执行：`uv run python -X utf8 -m pytest -q --tb=line`，当前246项通过。司法窗口41项可运行 `uv run pytest -q tests/contracts/test_query_window_adapter.py tests/contracts/test_query_window_service.py`。诊断测试单独运行：`uv run pytest -q tests/contracts/test_query_diagnostics_adapter.py tests/contracts/test_query_diagnostics_service.py`，当前50项通过。重试测试单独运行：`uv run pytest -q tests/contracts/test_query_retry.py`，当前17项通过。接纳测试单独运行：`uv run pytest -q tests/contracts/test_submission_service.py tests/contracts/test_submission_http.py`，当前30项通过。天眼查适配器可单独验证：`uv run pytest -q tests/contracts/test_tianyan_mcp_adapter.py`，当前16项通过；它使用假 HTTP 传输，不消耗真实查询额度。会话到任务终态切片可运行：`uv run pytest -q tests/contracts/test_session_http.py tests/contracts/test_search_service.py tests/contracts/test_search_http.py tests/contracts/test_confirm_service.py tests/contracts/test_confirm_http.py tests/contracts/test_operation_service.py tests/contracts/test_operation_http.py tests/contracts/test_query_operation.py`，当前26项通过。草稿切片可运行：`uv run pytest -q tests/contracts/test_draft_service.py tests/contracts/test_draft_http.py`，当前7项通过。
+上述命令检查契约结构与类型，不能证明全流程可用。契约测试单独执行：`uv run pytest -q --tb=short`，当前413项通过，无skip/xfail，保留一项既有Starlette/httpx弃用警告。仅运行本批：`uv run pytest -q tests/contracts/test_collection_schema.py tests/contracts/test_collection_adapter.py tests/contracts/test_collection_store.py tests/contracts/test_collection_service.py tests/contracts/test_collection_http.py`，167项通过。测试使用临时数据库及合成提供方，不消耗真实查询额度；真实API、真实时钟和浏览器专项另见验收记录。

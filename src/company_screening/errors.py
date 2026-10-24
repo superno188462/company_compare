@@ -22,3 +22,11 @@ class ModelError(Exception):
     """模型端口失败，不自动重试。"""
 
     code: ModelFailureCode
+
+
+class StorageError(Exception):
+    """COL-ERR-01：公共缓存不可读写；不得降级成无记录或泄露存储原文。"""
+
+
+class CollectionConflictError(Exception):
+    """COL-IF-02：claim或批次修订冲突，不能用迟到结果覆盖已提交材料。"""

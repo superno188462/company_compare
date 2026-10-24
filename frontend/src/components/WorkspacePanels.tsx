@@ -4,6 +4,7 @@ import type {
   OfficialLinksProps, ReportPanelProps, SearchPanelProps, SubjectHeaderProps,
 } from "./props.js";
 import type { Category } from "../contracts/generated.js";
+import { OfficialRecovery } from "./OfficialRecovery.js";
 
 const CATEGORY_ORDER: Category[] = ["basic", "abnormal", "penalty", "judicial", "asset"];
 
@@ -105,7 +106,7 @@ export function SubjectHeader({ subject }: SubjectHeaderProps) {
   );
 }
 
-export function CoveragePanel({ coverage, busy, onRetry, diagnostics }: CoveragePanelProps) {
+export function CoveragePanel({ coverage, busy, onRetry, diagnostics, onSupplement }: CoveragePanelProps) {
   const copy = dictionary.query_diagnostics;
   return (
     <section className="panel coverage-panel" aria-labelledby="coverage-title">
@@ -142,12 +143,14 @@ export function CoveragePanel({ coverage, busy, onRetry, diagnostics }: Coverage
                       aria-label={`${dictionary.actions.retry_category}：${dictionary.category_labels[category]}`}
                       onClick={() => onRetry([category])}
                     >
-                      {dictionary.actions.retry_category}
+                      {diagnostic?.reason_code === "TOOL_ENTITLEMENT_REQUIRED" ? dictionary.collection_labels.entitlement_retry : dictionary.actions.retry_category}
                     </button>
                   )}
                 </div>
               </div>
               {result.status === "partial" && <p className="window-notice">{dictionary.query_window.limited}</p>}
+              {result.status === "error" && <OfficialRecovery toolName={diagnostic?.tool_name ?? null}
+                onSupplement={() => onSupplement?.(category)} />}
               {(result.tool_coverage?.length ?? 0) > 0 && (
                 <details className="query-window">
                   <summary aria-label={`${dictionary.query_window.show}：${dictionary.category_labels[category]}`}>
@@ -224,13 +227,15 @@ export function CoveragePanel({ coverage, busy, onRetry, diagnostics }: Coverage
 export function EvidenceCard({ evidence }: EvidenceCardProps) {
   const sourceUrl = safeHttpUrl(evidence.source_url);
   return (
-    <article className={`evidence-card source-${evidence.source}`}>
-      <div className="evidence-meta">
+    <details className={`evidence-card source-${evidence.source}`}>
+      <summary className="evidence-meta">
+        <strong>{dictionary.collection_labels.record}</strong>
         <span>{dictionary.source_labels[evidence.source]}</span>
         <code>{evidence.evidence_id}</code>
-      </div>
+      </summary>
       <p>{evidence.content}</p>
       <dl className="compact-facts">
+        <div><dt>{dictionary.labels.snapshot_time}</dt><dd>{evidence.snapshot_time === null ? dictionary.labels.not_provided : new Date(evidence.snapshot_time).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}</dd></div>
         <div><dt>{dictionary.labels.event_time}</dt><dd>{shown(evidence.event_time)}</dd></div>
         <div><dt>{dictionary.labels.source_publisher}</dt><dd>{shown(evidence.source_publisher)}</dd></div>
       </dl>
@@ -238,7 +243,7 @@ export function EvidenceCard({ evidence }: EvidenceCardProps) {
         <a href={sourceUrl} target="_blank" rel="noopener noreferrer">查看来源定位 ↗</a>
       )}
       <small>{dictionary.labels.original_not_verified}</small>
-    </article>
+    </details>
   );
 }
 

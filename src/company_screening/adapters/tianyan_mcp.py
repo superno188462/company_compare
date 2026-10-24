@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 import hashlib
 import json
 import time
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import httpx
@@ -19,7 +19,10 @@ from ..contracts.boundary import (
     ProviderSearchPage,
     SearchCommand,
 )
-from ..contracts.generated import Category, CreditCode, QueryDiagnostic, Subject
+from ..contracts.generated import (
+    Category, CreditCode, JudicialToolName, ProviderJudicialPage, ProviderToolSnapshot,
+    QueryDiagnostic, SnapshotToolName, Subject,
+)
 from ..errors import ProviderError
 
 
@@ -311,6 +314,75 @@ class TianyanMcpAdapter:
             scope_description=_CATEGORY_SCOPE[category],
             records=records,
         )
+
+    def fetch_tool_snapshot(self, subject: Subject, tool_name: SnapshotToolName) -> ProviderToolSnapshot:
+        """COL-IF-02：非司法单工具完整采集；既有fetch_category保持。"""
+        name = SnapshotToolName(tool_name).value
+        content: _ToolContent | None = None
+        try:
+            if name == "get_company_registration_info":
+                content = self._call_tool(name, {"searchKey": subject.credit_code.root})
+                records = self._registration_records(subject, name, content)
+            else:
+                records = self._fetch_paged_tool(subject, name)
+            if len({item.record_id for item in records}) != len(records):
+                raise _provider_error("UPSTREAM_INVALID", False, reason_code="DUPLICATE_RECORDS", phase="aggregate", field="record_id")
+            return ProviderToolSnapshot.model_validate({
+                "binding_credit_code": subject.credit_code.root, "tool_name": name,
+                "queried_at": datetime.now(timezone.utc), "records": [item.model_dump(mode="json") for item in records],
+            })
+        except ProviderError as exc:
+            if exc.diagnostic is not None:
+                detail = exc.diagnostic.model_dump(mode="python")
+                detail["tool_name"] = name
+                if content is not None:
+                    detail["http_status"] = content.http_status
+                exc.diagnostic = QueryDiagnostic.model_validate(detail)
+            raise
+
+    def fetch_judicial_page(
+        self, subject: Subject, tool_name: JudicialToolName, *,
+        page_number: int, page_size: Literal[20] = 20,
+    ) -> ProviderJudicialPage:
+        """COL-IF-02/04：单司法工具指定页，固定20条，不自动翻页。"""
+        name = JudicialToolName(tool_name).value
+        if isinstance(page_number, bool) or not isinstance(page_number, int) or page_number < 1 or page_size != 20:
+            raise _provider_error("UPSTREAM_INVALID", False, reason_code="PAGINATION_INVALID", phase="pagination", tool_name=name)
+        content: _ToolContent | None = None
+        try:
+            content = self._call_tool(name, {"searchKey": subject.credit_code.root, "pageNum": page_number, "pageSize": 20})
+            unknown = "items" in content and content.get("total") is None
+            check: dict[str, Any] = dict(content)
+            # 缺省页大小必须使用实际请求20，不能沿用完整采集的100。
+            if "items" in check:
+                check.setdefault("pageSize", 20)
+            if unknown:
+                raw = check.get("items")
+                check["total"] = len(raw) if isinstance(raw, list) else 0
+            items, total, more = self._extract_page(check, page_number)
+            if len(items) > 20 or ("pageSize" in content and int(content["pageSize"]) != 20):
+                raise _provider_error("UPSTREAM_INVALID", False, reason_code="PAGINATION_INVALID", phase="pagination", field="items")
+            if not items and total > (page_number - 1) * 20:
+                raise _provider_error("UPSTREAM_INCOMPLETE", False, reason_code="PAGINATION_INCOMPLETE", phase="pagination", field="items")
+            records = [self._make_record(subject, name, item, nested_metadata=False) for item in items]
+            if len({item.record_id for item in records}) != len(records):
+                raise _provider_error("UPSTREAM_INVALID", False, reason_code="DUPLICATE_RECORDS", phase="aggregate", field="record_id")
+            truncated = content.get("_truncated") is True
+            return ProviderJudicialPage.model_validate({
+                "binding_credit_code": subject.credit_code.root, "tool_name": name,
+                "page_number": page_number, "page_size": 20, "queried_at": datetime.now(timezone.utc),
+                "records": [item.model_dump(mode="json") for item in records],
+                "total_count": None if unknown else total,
+                "has_more": None if unknown or truncated else more,
+            })
+        except ProviderError as exc:
+            if exc.diagnostic is not None:
+                detail = exc.diagnostic.model_dump(mode="python")
+                detail["tool_name"] = name
+                if content is not None and detail["http_status"] is None:
+                    detail["http_status"] = content.http_status
+                exc.diagnostic = QueryDiagnostic.model_validate(detail)
+            raise
 
     def _fetch_judicial_window(self, subject: Subject, record_limit: int) -> ProviderCategoryBatch:
         """WINDOW-IF-01：固定六项各取首批，原子接纳有效页并保留真实缺口。"""

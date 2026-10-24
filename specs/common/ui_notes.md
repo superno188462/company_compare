@@ -1,5 +1,7 @@
 # 企业公开线索筛查应用 UI 交互基线
 
+> 2026-10-24已确认COLLECTION-UI-1.0：[需求/UI方案v0.3](collection-browser.proposal.md)。沿用工作台，类别与单条默认折叠，司法按工具加载更多，显示API缓存原取得时间、已收集与报告纳入范围，提供主动更新和受限项人工复核。用户明确选择“确认其余交互，进入SDD”，随后确认COLLECTION-SDD-1；当前[浏览前端SDD](../frontend/collection-browser.spec.md)对应类型、装配和测试均已获确认，页面已实现；实际验收范围见[专项记录](collection-browser-acceptance.md)。
+
 > 2026-10-24 局部增补 WINDOW-UI-01 已由用户确认：司法类别显示“部分取得”，可展开每个子工具已纳入数、上游总数及剩余/失败情况；error/partial均可“重新查询”同一范围。沿用现有布局和官网新标签页入口，不增加下一页或自动全量请求。详见[已确认增补](../backend/query-bounded-results.spec.md)，本增补已完成页面实现及桌面/360像素窄屏验收。
 
 ## 文档状态
