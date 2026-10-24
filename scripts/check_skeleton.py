@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # 用户2026-10-23确认首批测试后，逐函数实现并验证的明确范围。
 IMPLEMENTED = {
+    ("src/company_screening/services.py", "_query_diagnostic"),
     ("src/company_screening/services.py", "SessionService._begin_query_retry"),
     ("src/company_screening/services.py", "SessionService.create"),
     ("src/company_screening/services.py", "SessionService.restore"),
@@ -161,7 +162,7 @@ def check_shared_models() -> None:
     inputs = json.loads((ROOT / "contracts/input-schema.json").read_text(encoding="utf-8"))
     outputs = json.loads((ROOT / "contracts/output-schema.json").read_text(encoding="utf-8"))
     definitions = {**inputs["$defs"], **outputs["$defs"], "LlmInput": inputs, "WorkflowPayload": outputs}
-    for name in ("Subject", "CategoryResults", "QueryCoverage", "SnapshotDraft", "WorkflowStatus", "SubmissionReceipt", "LlmInput", "WorkflowPayload"):
+    for name in ("Subject", "CategoryResults", "QueryCoverage", "QueryDiagnostic", "SnapshotDraft", "WorkflowStatus", "SubmissionReceipt", "LlmInput", "WorkflowPayload"):
         model = getattr(generated, name)
         schema = definitions[name]
         assert set(model.model_fields) == set(schema["properties"]), name
@@ -210,6 +211,11 @@ def main() -> None:
     dictionary = json.loads((ROOT / "contracts/text-dict.json").read_text(encoding="utf-8"))
     assert set(get_args(ValidationMessageKey)) == set(dictionary["validation"])
     assert {item.value for item in generated.HintCode} == set(dictionary["hints"])
+    diagnostic_copy = dictionary["query_diagnostics"]
+    assert {item.value for item in generated.ReasonCode} == set(diagnostic_copy["reasons"])
+    assert {item.value for item in generated.Phase} == set(diagnostic_copy["phases"])
+    assert {item.value for item in generated.ToolName if item.value is not None} == set(diagnostic_copy["tools"])
+    assert {item.value for item in generated.FieldModel if item.value is not None} == set(diagnostic_copy["fields"])
     for module in ("company_screening.contracts.boundary", "company_screening.services", "company_screening.ports", "company_screening.errors", "backend.app", "backend.dependencies", "backend.routes"):
         importlib.import_module(module)
     print(f"Contract structure OK: {len(IMPLEMENTED)} implemented functions/methods; {count} NotImplementedError functions; 13 service signatures; 3 port signatures; 13 routes; shared model/Schema round-trips and dictionary keys.")

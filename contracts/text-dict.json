@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "locale": "zh-CN",
   "app_name": "企业公开线索筛查",
   "hints": {
@@ -87,6 +87,62 @@
     "no_successful_report": "当前没有成功生成的报告",
     "official_sites": "官方公示网站",
     "official_copy_fallback": "如未打开新标签页，可复制官网地址后手动访问。"
+  },
+  "query_diagnostics": {
+    "show": "查看原因",
+    "not_recorded": "未记录",
+    "legacy": "这次查询未保存详细原因，请重新查询以记录新的诊断。",
+    "previous_result": "当前操作正在处理，下方为上次完整查询记录。",
+    "first_failure": "这里记录本类别首次失败的环节，不代表已列出所有子接口的失败情况。",
+    "labels": {
+      "reason": "具体原因", "phase": "失败环节", "tool": "失败子接口",
+      "http_status": "HTTP 状态", "field": "相关字段", "actual_count": "实际数量",
+      "limit_count": "应用上限", "diagnostic_id": "诊断编号", "queried_at": "查询时间（北京时间）",
+      "characters": "字符", "records": "条"
+    },
+    "phases": {
+      "configuration": "服务配置", "request": "接口请求", "response": "返回内容解析",
+      "pagination": "分页完整性校验", "record": "记录字段校验", "aggregate": "记录集合校验",
+      "unknown": "未记录"
+    },
+    "reasons": {
+      "PROVIDER_NOT_CONFIGURED": "服务端未配置企业数据提供方，本次未发起接口请求。",
+      "AUTH_REQUIRED": "接口返回鉴权或权限错误，尚不能确定是密钥问题还是工具权益不足；本信息不代表额度耗尽。",
+      "TOOL_ENTITLEMENT_REQUIRED": "上游明确返回该工具缺少调用权益，请在天眼查侧核对该工具的开通情况。",
+      "RATE_OR_QUOTA_LIMIT": "接口返回请求频率或额度限制，目前不能确定是否为额度耗尽。",
+      "REQUEST_TIMEOUT": "接口请求超时，未能完整取得资料。",
+      "NETWORK_ERROR": "网络连接或传输失败，未能取得正常响应。",
+      "REQUEST_REJECTED": "接口未正常接受请求，请结合实际 HTTP 状态核对。",
+      "SERVICE_UNAVAILABLE": "上游接口返回服务错误，未能取得正常结果。",
+      "RESPONSE_INVALID": "返回内容无法按当前接口约定解析，可能涉及返回结构或应用适配，需要核对。",
+      "PAGINATION_INVALID": "分页字段或页码不符合当前解析约定，无法确认已完整取得记录。",
+      "PAGINATION_CHANGED": "翻页过程中声明的总记录数发生变化，无法确认完整性。",
+      "PAGINATION_INCOMPLETE": "实际取得数量与声明总数不符，或仍有下一页却返回空页。",
+      "RECORD_LIMIT_EXCEEDED": "记录数量超过应用处理上限，本类别没有被截取后作为完整结果接纳；这不表示接口权益或余额不足。",
+      "CONTENT_LIMIT_EXCEEDED": "单条规范化正文超过应用字符上限，未静默截断后接纳。",
+      "UPSTREAM_WARNING": "接口返回了警告信息，应用无法确认资料完整；上游警告原文不在此展示。",
+      "RECORD_INVALID": "记录字段不符合当前数据契约，需要核对返回内容或解析适配。",
+      "SUBJECT_MISMATCH": "返回记录指向的企业代码与当前已确认主体不一致，已拒绝纳入。",
+      "DUPLICATE_RECORDS": "返回集合中出现重复记录定位，应用无法将其作为完整的新集合接纳。",
+      "UNCLASSIFIED_FAILURE": "具体原因未记录，无法仅凭错误分类确定失败子接口或触发环节。"
+    },
+    "tools": {
+      "search_companies": "企业候选搜索", "get_company_registration_info": "工商登记",
+      "get_shareholder_info": "股东及出资", "get_business_exception": "经营异常",
+      "get_administrative_penalty": "行政处罚", "get_dishonest_info": "失信被执行",
+      "get_judgment_debtor_info": "被执行人", "get_high_consumption_restriction": "限制高消费",
+      "get_judicial_case": "司法案件", "get_judicial_documents": "裁判文书",
+      "get_court_notice": "法院公告", "get_equity_freeze": "股权冻结",
+      "get_judicial_assistance": "司法协助", "get_chattel_mortgage_info": "动产抵押",
+      "get_land_mortgage_info": "土地抵押"
+    },
+    "fields": {
+      "tool_name": "工具名称", "content": "规范化正文", "sources": "来源对象",
+      "items": "分页记录列表", "total": "声明的总记录数", "pageNum": "页码",
+      "pageSize": "每页记录数", "record_id": "记录定位", "record_count": "记录数量",
+      "record_credit_code": "记录主体信用代码", "source_url": "来源链接",
+      "event_time": "事件时间或期间", "source_publisher": "来源发布者"
+    }
   },
   "actions": {
     "search": "搜索企业",

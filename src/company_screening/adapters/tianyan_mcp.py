@@ -6,6 +6,7 @@ import hashlib
 import json
 import time
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from pydantic import ValidationError
@@ -18,7 +19,7 @@ from ..contracts.boundary import (
     ProviderSearchPage,
     SearchCommand,
 )
-from ..contracts.generated import Category, CreditCode, Subject
+from ..contracts.generated import Category, CreditCode, QueryDiagnostic, Subject
 from ..errors import ProviderError
 
 
@@ -72,11 +73,39 @@ _PUBLISHER_KEYS = (
 )
 
 
-def _provider_error(code: ProviderFailureCode, retryable: bool) -> ProviderError:
-    """构造不携带上游正文或凭据的适配器错误。"""
+class _ToolContent(dict[str, Any]):
+    """只在单次调用栈中携带HTTP元数据，属性不进入响应内容或证据。"""
+
+    http_status: int
+
+
+class _ToolRecords(list[ProviderRecord]):
+    """已完整取得的子工具记录及最后一次实际HTTP状态。"""
+
+    http_status: int | None = None
+
+
+def _provider_error(
+    code: ProviderFailureCode,
+    retryable: bool,
+    *,
+    reason_code: str = "UNCLASSIFIED_FAILURE",
+    phase: str = "unknown",
+    tool_name: str | None = None,
+    http_status: int | None = None,
+    field: str | None = None,
+    actual_count: int | None = None,
+    limit_count: int | None = None,
+) -> ProviderError:
+    """仅以白名单及计数生成脱敏诊断，不接收上游消息或异常repr。"""
     error = ProviderError("Tianyan MCP request failed")
     error.code = code
     error.retryable = retryable
+    error.diagnostic = QueryDiagnostic.model_validate({
+        "diagnostic_id": uuid4(), "tool_name": tool_name, "phase": phase,
+        "reason_code": reason_code, "http_status": http_status, "field": field,
+        "actual_count": actual_count, "limit_count": limit_count,
+    })
     return error
 
 
@@ -103,7 +132,7 @@ class TianyanMcpAdapter:
             raise ValueError("detail_page_size must be between 1 and 100")
         self._detail_page_size = detail_page_size
 
-    def _call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    def _call_tool(self, tool_name: str, arguments: dict[str, Any]) -> _ToolContent:
         """调用一次 Shared Core 工具并统一处理重试、鉴权和 JSON 外壳。"""
         body = {"tool_name": tool_name, "arguments": arguments, "format": "json"}
         response: httpx.Response | None = None
@@ -119,42 +148,63 @@ class TianyanMcpAdapter:
                 if attempt == 0:
                     self._sleep(0.5)
                     continue
-                raise _provider_error("UPSTREAM_TIMEOUT", True) from exc
+                raise _provider_error("UPSTREAM_TIMEOUT", True, reason_code="REQUEST_TIMEOUT",
+                                      phase="request", tool_name=tool_name) from exc
             except httpx.RequestError as exc:
                 if attempt == 0:
                     self._sleep(0.5)
                     continue
-                raise _provider_error("UPSTREAM_ERROR", True) from exc
+                raise _provider_error("UPSTREAM_ERROR", True, reason_code="NETWORK_ERROR",
+                                      phase="request", tool_name=tool_name) from exc
             if response.status_code >= 500 and attempt == 0:
                 self._sleep(0.5)
                 continue
             break
 
         if response is None:
-            raise _provider_error("UPSTREAM_ERROR", True)
+            raise _provider_error("UPSTREAM_ERROR", True, reason_code="NETWORK_ERROR",
+                                  phase="request", tool_name=tool_name)
+        context: dict[str, Any] = {"tool_name": tool_name, "http_status": response.status_code}
         if response.status_code in (401, 403):
-            raise _provider_error("UPSTREAM_AUTH", False)
+            reason = "AUTH_REQUIRED"
+            if response.status_code == 403:
+                try:
+                    rejected = response.json()
+                    if isinstance(rejected, dict) and rejected.get("error") == "insufficient_entitlement":
+                        reason = "TOOL_ENTITLEMENT_REQUIRED"
+                except ValueError:
+                    pass
+            raise _provider_error("UPSTREAM_AUTH", False, reason_code=reason, phase="request", **context)
         if response.status_code == 429:
-            raise _provider_error("UPSTREAM_LIMIT", False)
+            raise _provider_error("UPSTREAM_LIMIT", False, reason_code="RATE_OR_QUOTA_LIMIT",
+                                  phase="request", **context)
         if 400 <= response.status_code < 500:
-            raise _provider_error("UPSTREAM_INVALID", False)
+            raise _provider_error("UPSTREAM_INVALID", False, reason_code="REQUEST_REJECTED",
+                                  phase="request", **context)
         if response.status_code >= 500:
-            raise _provider_error("UPSTREAM_ERROR", True)
+            raise _provider_error("UPSTREAM_ERROR", True, reason_code="SERVICE_UNAVAILABLE",
+                                  phase="request", **context)
         if not 200 <= response.status_code < 300:
-            raise _provider_error("UPSTREAM_ERROR", False)
+            raise _provider_error("UPSTREAM_ERROR", False, reason_code="REQUEST_REJECTED",
+                                  phase="request", **context)
 
+        field = "content"
         try:
             envelope: Any = response.json()
             if not isinstance(envelope, dict) or envelope.get("tool_name") != tool_name:
+                field = "tool_name"
                 raise TypeError("invalid envelope")
             content: Any = envelope["content"]
             if isinstance(content, str):
                 content = json.loads(content)
             if not isinstance(content, dict):
                 raise TypeError("invalid content")
-            return content
+            result = _ToolContent(content)
+            result.http_status = response.status_code
+            return result
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise _provider_error("UPSTREAM_INVALID", False) from exc
+            raise _provider_error("UPSTREAM_INVALID", False, reason_code="RESPONSE_INVALID",
+                                  phase="response", field=field, **context) from exc
 
     def search(self, command: SearchCommand) -> ProviderSearchPage:
         """调用 search_companies，只规范化候选，不选择主体。"""
@@ -214,18 +264,36 @@ class TianyanMcpAdapter:
     def fetch_category(self, subject: Subject, category: Category) -> ProviderCategoryBatch:
         """按固定子工具计划完整取得一个类别；任何部分失败都拒绝整个批次。"""
         records: list[ProviderRecord] = []
+        http_status: int | None = None
+        last_tool: str | None = None
+        tool_records: list[ProviderRecord]
         for tool_name, paged in _CATEGORY_TOOL_PLAN[category]:
+            last_tool = tool_name
             if paged:
-                tool_records = self._fetch_paged_tool(subject, tool_name)
+                paged_records = self._fetch_paged_tool(subject, tool_name)
+                http_status = paged_records.http_status
+                tool_records = paged_records
             else:
                 content = self._call_tool(tool_name, {"searchKey": subject.credit_code.root})
-                tool_records = self._registration_records(subject, tool_name, content)
+                http_status = content.http_status
+                try:
+                    tool_records = self._registration_records(subject, tool_name, content)
+                except ProviderError as exc:
+                    if exc.diagnostic is not None:
+                        exc.diagnostic = QueryDiagnostic.model_validate({
+                            **exc.diagnostic.model_dump(mode="python"),
+                            "tool_name": tool_name, "http_status": http_status,
+                        })
+                    raise
             if len(records) + len(tool_records) > 200:
-                raise _provider_error("UPSTREAM_INCOMPLETE", False)
+                raise _provider_error("UPSTREAM_INCOMPLETE", False, reason_code="RECORD_LIMIT_EXCEEDED",
+                                      phase="aggregate", tool_name=tool_name, http_status=http_status,
+                                      field="record_count", actual_count=len(records) + len(tool_records), limit_count=200)
             records.extend(tool_records)
 
         if len({record.record_id for record in records}) != len(records):
-            raise _provider_error("UPSTREAM_INVALID", False)
+            raise _provider_error("UPSTREAM_INVALID", False, reason_code="DUPLICATE_RECORDS",
+                                  phase="aggregate", field="record_id", tool_name=last_tool, http_status=http_status)
         return ProviderCategoryBatch(
             binding_credit_code=subject.credit_code.root,
             category=category,
@@ -234,36 +302,56 @@ class TianyanMcpAdapter:
             records=records,
         )
 
-    def _fetch_paged_tool(self, subject: Subject, tool_name: str) -> list[ProviderRecord]:
+    def _fetch_paged_tool(self, subject: Subject, tool_name: str) -> _ToolRecords:
         """完整读取一个明细工具的所有页面，并核对页码、总数和类别预算。"""
-        records: list[ProviderRecord] = []
+        records = _ToolRecords()
         expected_total: int | None = None
         page_number = 1
-        while True:
-            content = self._call_tool(tool_name, {
-                "searchKey": subject.credit_code.root,
-                "pageNum": page_number,
-                "pageSize": self._detail_page_size,
-            })
-            items, total, has_more = self._extract_page(content, page_number)
-            if expected_total is None:
-                expected_total = total
-                if total > 200:
-                    raise _provider_error("UPSTREAM_INCOMPLETE", False)
-            elif total != expected_total:
-                raise _provider_error("UPSTREAM_INCOMPLETE", False)
-            for item in items:
-                records.append(self._make_record(subject, tool_name, item, nested_metadata=False))
-            if len(records) > 200:
-                raise _provider_error("UPSTREAM_INCOMPLETE", False)
-            if not has_more:
-                break
-            if not items:
-                raise _provider_error("UPSTREAM_INCOMPLETE", False)
-            page_number += 1
+        content: _ToolContent | None = None
+        try:
+            while True:
+                # 新页面无响应时不能沿用上一页的HTTP200。
+                content = None
+                content = self._call_tool(tool_name, {
+                    "searchKey": subject.credit_code.root,
+                    "pageNum": page_number,
+                    "pageSize": self._detail_page_size,
+                })
+                records.http_status = content.http_status
+                items, total, has_more = self._extract_page(content, page_number)
+                if expected_total is None:
+                    expected_total = total
+                    if total > 200:
+                        raise _provider_error("UPSTREAM_INCOMPLETE", False,
+                                              reason_code="RECORD_LIMIT_EXCEEDED", phase="pagination",
+                                              field="total", actual_count=total, limit_count=200)
+                elif total != expected_total:
+                    raise _provider_error("UPSTREAM_INCOMPLETE", False, reason_code="PAGINATION_CHANGED",
+                                          phase="pagination", field="total")
+                for item in items:
+                    records.append(self._make_record(subject, tool_name, item, nested_metadata=False))
+                if len(records) > 200:
+                    raise _provider_error("UPSTREAM_INCOMPLETE", False,
+                                          reason_code="RECORD_LIMIT_EXCEEDED", phase="pagination",
+                                          field="record_count", actual_count=len(records), limit_count=200)
+                if not has_more:
+                    break
+                if not items:
+                    raise _provider_error("UPSTREAM_INCOMPLETE", False, reason_code="PAGINATION_INCOMPLETE",
+                                          phase="pagination", field="items", actual_count=len(records))
+                page_number += 1
 
-        if expected_total is None or len(records) != expected_total:
-            raise _provider_error("UPSTREAM_INCOMPLETE", False)
+            if expected_total is None or len(records) != expected_total:
+                raise _provider_error("UPSTREAM_INCOMPLETE", False, reason_code="PAGINATION_INCOMPLETE",
+                                      phase="pagination", field="items", actual_count=len(records))
+        except ProviderError as exc:
+            if exc.diagnostic is not None:
+                detail = exc.diagnostic.model_dump(mode="python")
+                detail["tool_name"] = tool_name
+                if detail["http_status"] is None and content is not None:
+                    detail["http_status"] = content.http_status
+                exc.diagnostic = QueryDiagnostic.model_validate(detail)
+            raise
         return records
 
     def _extract_page(
@@ -271,18 +359,20 @@ class TianyanMcpAdapter:
     ) -> tuple[list[dict[str, Any]], int, bool]:
         """解析直接 items 或 sources 聚合分页结构，不猜测缺失的分页元数据。"""
         self._reject_warnings(content)
-        if isinstance(content.get("items"), list):
+        if "items" in content:
             return self._page_part(content, expected_page)
 
         sources = content.get("sources")
         if not isinstance(sources, dict):
-            raise _provider_error("UPSTREAM_INVALID", False)
+            raise _provider_error("UPSTREAM_INVALID", False, reason_code="RESPONSE_INVALID",
+                                  phase="response", field="sources")
         all_items: list[dict[str, Any]] = []
         total = 0
         has_more = False
         for source in sources.values():
             if not isinstance(source, dict):
-                raise _provider_error("UPSTREAM_INVALID", False)
+                raise _provider_error("UPSTREAM_INVALID", False, reason_code="RESPONSE_INVALID",
+                                      phase="response", field="sources")
             self._reject_warnings(source)
             if source.get("_empty") is True or source.get("empty") is True:
                 source = {**source, "items": source.get("items", []), "total": source.get("total", 0)}
@@ -296,23 +386,36 @@ class TianyanMcpAdapter:
         self, content: dict[str, Any], expected_page: int,
     ) -> tuple[list[dict[str, Any]], int, bool]:
         """校验单一分页分片，拒绝布尔数值及不一致的分页声明。"""
+        field = "items"
         try:
             raw_items = content["items"]
             if not isinstance(raw_items, list) or any(not isinstance(item, dict) for item in raw_items):
                 raise TypeError("invalid items")
+            field = "total"
             raw_total = content["total"]
             raw_page = content.get("pageNum", expected_page)
             raw_size = content.get("pageSize", self._detail_page_size)
-            if any(isinstance(value, bool) for value in (raw_total, raw_page, raw_size)):
-                raise TypeError("invalid pagination")
-            total, page_number, page_size = int(raw_total), int(raw_page), int(raw_size)
-            if total < 0 or page_number != expected_page or page_size < 1 or len(raw_items) > page_size:
-                raise ValueError("invalid pagination")
-            if len(raw_items) > total:
+            if isinstance(raw_total, bool):
+                raise TypeError("invalid total")
+            total = int(raw_total)
+            if total < 0 or len(raw_items) > total:
                 raise ValueError("invalid total")
+            field = "pageNum"
+            if isinstance(raw_page, bool):
+                raise TypeError("invalid page")
+            page_number = int(raw_page)
+            if page_number != expected_page:
+                raise ValueError("invalid page")
+            field = "pageSize"
+            if isinstance(raw_size, bool):
+                raise TypeError("invalid page size")
+            page_size = int(raw_size)
+            if page_size < 1 or len(raw_items) > page_size:
+                raise ValueError("invalid pagination")
             return raw_items, total, page_number * page_size < total
         except (KeyError, TypeError, ValueError) as exc:
-            raise _provider_error("UPSTREAM_INVALID", False) from exc
+            raise _provider_error("UPSTREAM_INVALID", False, reason_code="PAGINATION_INVALID",
+                                  phase="pagination", field=field) from exc
 
     def _registration_records(
         self, subject: Subject, tool_name: str, content: dict[str, Any],
@@ -325,10 +428,12 @@ class TianyanMcpAdapter:
             return []
         sources = content.get("sources")
         if not isinstance(sources, dict) or not sources:
-            raise _provider_error("UPSTREAM_INVALID", False)
+            raise _provider_error("UPSTREAM_INVALID", False, reason_code="RESPONSE_INVALID",
+                                  phase="response", field="sources", tool_name=tool_name)
         for source in sources.values():
             if not isinstance(source, dict):
-                raise _provider_error("UPSTREAM_INVALID", False)
+                raise _provider_error("UPSTREAM_INVALID", False, reason_code="RESPONSE_INVALID",
+                                      phase="response", field="sources", tool_name=tool_name)
             self._reject_warnings(source)
         if all(
             isinstance(value, dict) and (value.get("empty") is True or value.get("_empty") is True)
@@ -347,18 +452,23 @@ class TianyanMcpAdapter:
             try:
                 credit_code = CreditCode(str(credit_raw).strip())
             except ValidationError as exc:
-                raise _provider_error("UPSTREAM_INVALID", False) from exc
+                raise _provider_error("UPSTREAM_INVALID", False, reason_code="RECORD_INVALID",
+                                      phase="record", field="record_credit_code", tool_name=tool_name) from exc
             if credit_code.root != subject.credit_code.root:
-                raise _provider_error("SUBJECT_RESPONSE_MISMATCH", False)
+                raise _provider_error("SUBJECT_RESPONSE_MISMATCH", False, reason_code="SUBJECT_MISMATCH",
+                                      phase="record", field="record_credit_code", tool_name=tool_name)
 
         cleaned = self._clean_value(raw)
         if not isinstance(cleaned, dict) or not cleaned:
-            raise _provider_error("UPSTREAM_INVALID", False)
+            raise _provider_error("UPSTREAM_INVALID", False, reason_code="RECORD_INVALID",
+                                  phase="record", field="content", tool_name=tool_name)
         content = json.dumps(
             {"tool": tool_name, "data": cleaned}, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         )
         if len(content) > 4000:
-            raise _provider_error("UPSTREAM_INCOMPLETE", False)
+            raise _provider_error("UPSTREAM_INCOMPLETE", False, reason_code="CONTENT_LIMIT_EXCEEDED",
+                                  phase="record", field="content", tool_name=tool_name,
+                                  actual_count=len(content), limit_count=4000)
 
         explicit_id = self._find_value(raw, _ID_KEYS, recursive=nested_metadata)
         canonical = json.dumps(cleaned, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -369,9 +479,9 @@ class TianyanMcpAdapter:
         if len(record_id) > 256:
             record_id = f"{tool_name}:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
-        event_time = self._small_text(self._find_value(raw, _TIME_KEYS, recursive=nested_metadata))
-        source_url = self._small_text(self._find_value(raw, _URL_KEYS, recursive=nested_metadata), 2048)
-        publisher = self._small_text(self._find_value(raw, _PUBLISHER_KEYS, recursive=nested_metadata))
+        event_time = self._small_text(self._find_value(raw, _TIME_KEYS, recursive=nested_metadata), field="event_time")
+        source_url = self._small_text(self._find_value(raw, _URL_KEYS, recursive=nested_metadata), 2048, field="source_url")
+        publisher = self._small_text(self._find_value(raw, _PUBLISHER_KEYS, recursive=nested_metadata), field="source_publisher")
         try:
             return ProviderRecord(
                 record_id=record_id,
@@ -382,7 +492,12 @@ class TianyanMcpAdapter:
                 source_publisher=publisher,
             )
         except ValidationError as exc:
-            raise _provider_error("UPSTREAM_INVALID", False) from exc
+            location = exc.errors(include_input=False)[0]["loc"]
+            field = str(location[0]) if location and location[0] in (
+                "record_id", "content", "record_credit_code", "event_time", "source_url", "source_publisher",
+            ) else None
+            raise _provider_error("UPSTREAM_INVALID", False, reason_code="RECORD_INVALID",
+                                  phase="record", field=field, tool_name=tool_name) from exc
 
     def _clean_value(self, value: Any) -> Any:
         """递归清理评分、评级和联系方式字段，其他公开事实保持原样。"""
@@ -420,9 +535,10 @@ class TianyanMcpAdapter:
             return
         warnings = value.get("_warnings")
         if warnings not in (None, "", []):
-            raise _provider_error("UPSTREAM_INCOMPLETE", False)
+            raise _provider_error("UPSTREAM_INCOMPLETE", False, reason_code="UPSTREAM_WARNING",
+                                  phase="response")
 
-    def _small_text(self, value: Any, maximum: int = 256) -> str | None:
+    def _small_text(self, value: Any, maximum: int = 256, *, field: str | None = None) -> str | None:
         """把可选元数据规范化为受限非空文本，拒绝静默截断。"""
         if value in (None, ""):
             return None
@@ -430,5 +546,6 @@ class TianyanMcpAdapter:
         if not text:
             return None
         if len(text) > maximum:
-            raise _provider_error("UPSTREAM_INVALID", False)
+            raise _provider_error("UPSTREAM_INVALID", False, reason_code="RECORD_INVALID",
+                                  phase="record", field=field)
         return text

@@ -1,6 +1,7 @@
 """BE-ERR-01 / BE-IF-07：异常类型声明，不实现错误映射。"""
 
 from .contracts.boundary import ErrorInfo, ModelFailureCode, ProviderFailureCode
+from .contracts.generated import QueryDiagnostic
 
 
 class ApplicationError(Exception):
@@ -14,6 +15,7 @@ class ProviderError(Exception):
 
     code: ProviderFailureCode
     retryable: bool
+    diagnostic: QueryDiagnostic | None = None
 
 
 class ModelError(Exception):

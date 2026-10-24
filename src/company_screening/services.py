@@ -18,7 +18,7 @@ from .contracts.boundary import (
     SessionExpiry, SubmitEvidenceCommand, WithdrawalResult, WorkspaceState,
 )
 from .errors import ApplicationError, ProviderError
-from .contracts.generated import Category, HintCode, LlmStatus, NullableText, Subject, WorkflowPayload
+from .contracts.generated import Category, HintCode, LlmStatus, NullableText, QueryDiagnostic, Subject, WorkflowPayload
 from .ports import CompanyDataPort
 
 
@@ -29,6 +29,22 @@ CATEGORY_ERROR_SCOPE = {
     "judicial": "失信、被执行、限高、司法案件、裁判文书及法院公告计划查询未完整完成",
     "asset": "股权冻结、司法协助、动产抵押及土地抵押计划查询未完整完成",
 }
+
+
+def _query_diagnostic(
+    reason_code: str = "UNCLASSIFIED_FAILURE",
+    phase: str = "unknown",
+    *,
+    field: str | None = None,
+    actual_count: int | None = None,
+    limit_count: int | None = None,
+) -> QueryDiagnostic:
+    """生成应用层已知原因；无提供方上下文时不猜HTTP状态或子工具。"""
+    return QueryDiagnostic.model_validate({
+        "diagnostic_id": uuid4(), "tool_name": None, "phase": phase,
+        "reason_code": reason_code, "http_status": None, "field": field,
+        "actual_count": actual_count, "limit_count": limit_count,
+    })
 
 
 class SessionService:
@@ -733,13 +749,20 @@ class ScreeningService:
         evidence_rows: list[dict[str, object]] = (
             previous.model_dump(mode="python")["evidence_list"] if previous is not None else []
         )
+        query_diagnostics = {
+            key: detail.model_copy(deep=True)
+            for key, detail in (previous.api_status.query_diagnostics or {}).items()
+            if getattr(previous.api_status.categories, key).root.status == "error"
+        } if previous is not None else {}
         planned = previous.api_status.planned_categories.root if previous is not None else list(Category)
         expected_credit = subject.credit_code.root
         for category in Category:
             if category not in planned or (retry_categories is not None and category not in retry_categories):
                 continue
+            query_diagnostics.pop(category.value, None)
             attempted_at = self._clock()
             if self._company_data is None:
+                query_diagnostics[category.value] = _query_diagnostic("PROVIDER_NOT_CONFIGURED", "configuration")
                 category_results[category.value] = {
                     "status": "error",
                     "record_count": 0,
@@ -751,8 +774,14 @@ class ScreeningService:
             try:
                 batch = self._company_data.fetch_category(subject, category)
                 if batch.category != category:
-                    raise ValueError("category mismatch")
+                    provider_failure = ProviderError("Provider category does not match query")
+                    provider_failure.code, provider_failure.retryable = "UPSTREAM_INVALID", False
+                    provider_failure.diagnostic = _query_diagnostic("RESPONSE_INVALID", "response")
+                    raise provider_failure
                 if batch.binding_credit_code != expected_credit:
+                    query_diagnostics[category.value] = _query_diagnostic(
+                        "SUBJECT_MISMATCH", "record", field="record_credit_code",
+                    )
                     category_results[category.value] = {
                         "status": "error",
                         "record_count": 0,
@@ -762,6 +791,9 @@ class ScreeningService:
                     }
                     continue
                 if any(record.record_credit_code not in (None, expected_credit) for record in batch.records):
+                    query_diagnostics[category.value] = _query_diagnostic(
+                        "SUBJECT_MISMATCH", "record", field="record_credit_code",
+                    )
                     category_results[category.value] = {
                         "status": "error",
                         "record_count": 0,
@@ -775,6 +807,13 @@ class ScreeningService:
                     row["source"] == "tianyan" and row["category"] == category.value
                 )]
                 if len(record_ids) != len(set(record_ids)) or len(retained_rows) + len(batch.records) > 200:
+                    duplicate = len(record_ids) != len(set(record_ids))
+                    query_diagnostics[category.value] = _query_diagnostic(
+                        "DUPLICATE_RECORDS" if duplicate else "RECORD_LIMIT_EXCEEDED", "aggregate",
+                        field="record_id" if duplicate else "record_count",
+                        actual_count=None if duplicate else len(retained_rows) + len(batch.records),
+                        limit_count=None if duplicate else 200,
+                    )
                     category_results[category.value] = {
                         "status": "error",
                         "record_count": 0,
@@ -816,6 +855,12 @@ class ScreeningService:
                     "error_code": None,
                 }
             except ProviderError as exc:
+                try:
+                    detail = (QueryDiagnostic.model_validate(exc.diagnostic.model_dump(mode="python"))
+                              if exc.diagnostic is not None else _query_diagnostic())
+                except (AttributeError, TypeError, ValueError):
+                    detail = _query_diagnostic()
+                query_diagnostics[category.value] = detail
                 category_results[category.value] = {
                     "status": "error",
                     "record_count": 0,
@@ -824,6 +869,7 @@ class ScreeningService:
                     "error_code": exc.code,
                 }
             except Exception:
+                query_diagnostics[category.value] = _query_diagnostic()
                 category_results[category.value] = {
                     "status": "error",
                     "record_count": 0,
@@ -884,6 +930,7 @@ class ScreeningService:
                 "tianyan_status": tianyan_status,
                 "planned_categories": planned,
                 "categories": category_results,
+                "query_diagnostics": query_diagnostics,
                 "session_id": handle.session_id,
                 "session_generation": handle.session_generation,
                 "operation_id": handle.operation_id,

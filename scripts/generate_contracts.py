@@ -79,6 +79,15 @@ def build_bundle() -> dict[str, Any]:
     # 生成器不应把 if/then 的局部字段误生成为可独立调用的应用模型。
     # 完整条件仍由原 output-schema.json 约束，骨架不实现该校验。
     definitions["WorkflowStatus"].pop("allOf")
+    # 仅展开诊断映射的引用，让可选字段的{}默认值保持字典类型。
+    # 部分生成器会把 RootModel 引用的默认{}生成为不合法的模型赋值；
+    # 展开不改变机器Schema的可选键、白名单、值约束或空对象语义。
+    diagnostics_property = definitions["WorkflowStatus"]["properties"].get("query_diagnostics")
+    if diagnostics_property is not None:
+        definitions["WorkflowStatus"]["properties"]["query_diagnostics"] = {
+            **copy.deepcopy(definitions["QueryDiagnostics"]),
+            **{key: value for key, value in diagnostics_property.items() if key != "$ref"},
+        }
     for name, document in (("LlmInput", source), ("WorkflowPayload", output)):
         model = {key: copy.deepcopy(value) for key, value in document.items() if key not in {"$schema", "$id", "$defs", "allOf"}}
         model["title"] = name
@@ -111,7 +120,7 @@ def main() -> None:
         schema_path = Path(directory) / "contract-bundle.json"
         schema_path.write_text(json.dumps(build_bundle(), ensure_ascii=False, indent=2), encoding="utf-8")
         subprocess.run(
-            [sys.executable, "-m", "datamodel_code_generator", "--input", str(schema_path), "--input-file-type", "jsonschema", "--output", str(python_output), "--output-model-type", "pydantic_v2.BaseModel", "--target-python-version", "3.12", "--field-constraints", "--use-annotated", "--use-standard-collections", "--use-union-operator", "--use-schema-description", "--strict-types", "str", "int", "float", "bool", "--extra-fields", "forbid", "--base-class", "company_screening.contracts.base.ContractModel", "--disable-timestamp", "--no-allow-remote-refs", "--formatters", "black", "isort"],
+            [sys.executable, "-m", "datamodel_code_generator", "--input", str(schema_path), "--input-file-type", "jsonschema", "--output", str(python_output), "--output-model-type", "pydantic_v2.BaseModel", "--target-python-version", "3.12", "--field-constraints", "--use-annotated", "--use-standard-collections", "--use-union-operator", "--use-schema-description", "--strict-nullable", "--strict-types", "str", "int", "float", "bool", "--extra-fields", "forbid", "--base-class", "company_screening.contracts.base.ContractModel", "--disable-timestamp", "--no-allow-remote-refs", "--formatters", "black", "isort"],
             cwd=ROOT,
             check=True,
         )

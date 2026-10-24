@@ -105,7 +105,8 @@ export function SubjectHeader({ subject }: SubjectHeaderProps) {
   );
 }
 
-export function CoveragePanel({ coverage, busy, onRetry }: CoveragePanelProps) {
+export function CoveragePanel({ coverage, busy, onRetry, diagnostics }: CoveragePanelProps) {
+  const copy = dictionary.query_diagnostics;
   return (
     <section className="panel coverage-panel" aria-labelledby="coverage-title">
       <div className="section-heading">
@@ -117,30 +118,73 @@ export function CoveragePanel({ coverage, busy, onRetry }: CoveragePanelProps) {
       <div className="coverage-list">
         {CATEGORY_ORDER.map((category) => {
           const result = coverage.categories[category];
+          const diagnostic = diagnostics?.[category];
+          const countUnit = diagnostic?.reason_code === "CONTENT_LIMIT_EXCEEDED"
+            ? copy.labels.characters : copy.labels.records;
           return (
             <article className="coverage-row" key={category}>
-              <div>
-                <strong>{dictionary.category_labels[category]}</strong>
-                <p>{result.scope_description}</p>
+              <div className="coverage-row-main">
+                <div>
+                  <strong>{dictionary.category_labels[category]}</strong>
+                  <p>{result.scope_description}</p>
+                </div>
+                <div className="coverage-result">
+                  <span className={`status-text status-${result.status}`}>
+                    {dictionary.category_status_labels[result.status]}
+                  </span>
+                  {result.error_code !== null && <small>{result.error_code}</small>}
+                  {result.record_count > 0 && <small>{result.record_count} 条</small>}
+                  {result.status === "error" && coverage.planned_categories.includes(category) && (
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={busy}
+                      aria-label={`${dictionary.actions.retry_category}：${dictionary.category_labels[category]}`}
+                      onClick={() => onRetry([category])}
+                    >
+                      {dictionary.actions.retry_category}
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="coverage-result">
-                <span className={`status-text status-${result.status}`}>
-                  {dictionary.category_status_labels[result.status]}
-                </span>
-                {result.error_code !== null && <small>{result.error_code}</small>}
-                {result.record_count > 0 && <small>{result.record_count} 条</small>}
-                {result.status === "error" && coverage.planned_categories.includes(category) && (
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={busy}
-                    aria-label={`${dictionary.actions.retry_category}：${dictionary.category_labels[category]}`}
-                    onClick={() => onRetry([category])}
-                  >
-                    {dictionary.actions.retry_category}
-                  </button>
-                )}
-              </div>
+              {result.status === "error" && (
+                <details className="query-diagnostic">
+                  <summary aria-label={`${copy.show}：${dictionary.category_labels[category]}`}>{copy.show}</summary>
+                  <div className="diagnostic-content">
+                    {busy && <p className="diagnostic-note">{copy.previous_result}</p>}
+                    {diagnostic === undefined ? <p>{copy.legacy}</p> : (
+                      <>
+                        <p className="diagnostic-reason">{copy.reasons[diagnostic.reason_code]}</p>
+                        <dl className="diagnostic-facts">
+                          <div><dt>{copy.labels.tool}</dt><dd>
+                            {diagnostic.tool_name === null ? copy.not_recorded : (
+                              <>{copy.tools[diagnostic.tool_name]}<code>{diagnostic.tool_name}</code></>
+                            )}
+                          </dd></div>
+                          <div><dt>{copy.labels.phase}</dt><dd>{copy.phases[diagnostic.phase]}</dd></div>
+                          <div><dt>{copy.labels.http_status}</dt><dd>{diagnostic.http_status ?? copy.not_recorded}</dd></div>
+                          <div><dt>{copy.labels.field}</dt><dd>
+                            {diagnostic.field === null ? copy.not_recorded : copy.fields[diagnostic.field]}
+                          </dd></div>
+                          <div><dt>{copy.labels.actual_count}</dt><dd>
+                            {diagnostic.actual_count === null ? copy.not_recorded : `${diagnostic.actual_count} ${countUnit}`}
+                          </dd></div>
+                          <div><dt>{copy.labels.limit_count}</dt><dd>
+                            {diagnostic.limit_count === null ? copy.not_recorded : `${diagnostic.limit_count} ${countUnit}`}
+                          </dd></div>
+                          <div><dt>{copy.labels.queried_at}</dt><dd>
+                            {result.queried_at === null ? copy.not_recorded : new Date(result.queried_at).toLocaleString(
+                              "zh-CN", { timeZone: "Asia/Shanghai", hour12: false },
+                            )}
+                          </dd></div>
+                          <div><dt>{copy.labels.diagnostic_id}</dt><dd><code>{diagnostic.diagnostic_id}</code></dd></div>
+                        </dl>
+                        <p className="diagnostic-note">{copy.first_failure}</p>
+                      </>
+                    )}
+                  </div>
+                </details>
+              )}
             </article>
           );
         })}

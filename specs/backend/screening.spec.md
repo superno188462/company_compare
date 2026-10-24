@@ -4,12 +4,12 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 标识 / 文档版本 | SDD-BE-SCREENING / v2.4 |
-| 行为契约 | CONTRACT-1.0，SDD与首批测试已确认；逐函数实现中 |
+| 标识 / 文档版本 | SDD-BE-SCREENING / v2.6 |
+| 行为契约 | CONTRACT-1.0 + DIAG-1.0；对应SDD/类型/测试已确认，逐切片实现中 |
 | PRD / UI 基线 | [PRD-1.0](../common/prd.md)、[UI-1.0](../common/ui_notes.md) |
 | 共享定义 | [global_schema.md](../common/global_schema.md)、[输入 Schema](../../contracts/input-schema.json)、[输出 Schema](../../contracts/output-schema.json) |
 | 责任人 / 评审人 | 项目开发者（用户本人） |
-| 日期 / 状态 | 2026-10-24 / 已接通会话、搜索、人工确认、五类查询、失败类别重试、任务轮询、草稿和私人线索接纳；共享与模型待实现 |
+| 日期 / 状态 | 2026-10-24 / 已接通会话、搜索、人工确认、五类查询、失败类别重试/诊断、任务轮询、草稿和私人线索接纳；共享与模型待实现 |
 
 | 日期 | 版本 | 变更 | 评审记录 |
 | --- | --- | --- | --- |
@@ -29,6 +29,8 @@
 | 2026-10-23 | v2.2 | 逐函数实现私人线索原子接纳、幂等、任务终态与HTTP接线；接通页面提交；CONTRACT-1.0不变 | 已确认30项接纳测试全部通过，全量138通过；模型未配置明确报告失败并保留证据；共享发布尚未装配 |
 | 2026-10-24 | v2.3 | 准备失败类别重试的17项服务/HTTP测试QUERY-RETRY-TEST-1；沿用BE-IF-03/05/06和DATA-02/05 | 用户明确选择“确认，补齐重试按钮和后端（推荐）”，批准本批17项测试并进入逐函数实现；初次17项占位失败，既有138项测试或Schema不变 |
 | 2026-10-24 | v2.4 | 逐函数实现失败类别重试、保留式结果合并、任务释放及HTTP接线；CONTRACT-1.0不变 | 已批准17项重试测试全部通过，全量155通过；隔离合成提供方下浏览器验证按钮、等待/再次失败/成功恢复和草稿保留；未再次调用真实收费接口 |
+| 2026-10-24 | v2.5 | DIAG-1.0分类失败诊断扩展，详情见query-diagnostics.spec.md | 用户明确选择“确认本版 SDD/UI（推荐）”，批准具体字段与规则，进入类型和测试阶段 |
+| 2026-10-24 | v2.6 | DIAG-TYPE-1及DIAG-TEST-1获用户分别确认后逐函数实现脱敏诊断和完整结果接线 | 全量205通过；原155项不变，未知不猜测，输入Schema不变；集成记录见诊断SDD及tests/test-cases.md |
 
 ## 2. 目标与范围
 
@@ -145,7 +147,7 @@
 
 `ProviderRecord` 必含 `record_id: str[1..256]`、`content: str[1..4000]`、`record_credit_code: CreditCode?`、`event_time: str?[1..256]`、`source_url: HttpUrl?`、`source_publisher: str?[1..256]`。`ProviderCategoryBatch` 必含 `binding_credit_code: CreditCode`、`category: Category`、`queried_at: Timestamp`、`scope_description: str[1..500]`、`records: ProviderRecord[0..200]`。记录 ID 在同一提供方类别内稳定；适配器不能凭相似名称填绑定代码，必须有可核验的查询绑定映射。正常空批次表示完整成功无记录，不通过异常模拟空结果。
 
-`ProviderError` 公共属性为 `code`（输入 Schema 中分类 error_code 的非空枚举）及 `retryable: bool`；`ModelError.code` 为 MODEL_TIMEOUT / MODEL_CONTEXT_LIMIT / MODEL_AUTH / MODEL_UNAVAILABLE，全部不自动重试。应用将这些端口错误映射成前述工作台状态，不把提供方原始异常暴露给用户或模型。
+`ProviderError` 公共属性为 `code`（输入 Schema 中分类 error_code 的非空枚举）、`retryable: bool`及DIAG-1.0的可选`diagnostic: QueryDiagnostic | None = None`；旧适配器可不提供诊断，应用标记未记录。`ModelError.code` 为 MODEL_TIMEOUT / MODEL_CONTEXT_LIMIT / MODEL_AUTH / MODEL_UNAVAILABLE，全部不自动重试。应用将这些端口错误映射成前述工作台状态，不把提供方原始异常暴露给用户或模型。
 
 ### BE-IF-03 搜索、确认与查询
 
@@ -186,6 +188,8 @@
 ## 6. 异常与错误契约
 
 ### BE-ERR-01
+
+分类查询诊断扩展见 [查询失败诊断 SDD](query-diagnostics.spec.md) DIAG-1.0，已获用户确认。增加工作流输出诊断及ProviderError可选诊断属性，不改变本节原错误码与查询判定。
 
 文案扩展基线TEXT-1.1：缺少专用提示的分页、UUID、请求头及其他格式错误使用 `validation.input_invalid`（“输入格式不正确，请核对后重试。”），仍使用 `INPUT_INVALID` 与422，不新增请求/响应字段。已定义的公司名称等专用提示优先保留；字段错误包只给字段定位和文案键，不含原始输入。
 
@@ -240,7 +244,7 @@
 
 ## 9. 验收与追踪
 
-测试规划及执行结果见 [test-cases.md](../../tests/test-cases.md)。当前138项通过，包含用户确认的30项私人接纳测试；共享、真实模型及存储专项仍待完成，不代表完整系统已通过验收。
+测试规划及执行结果见 [test-cases.md](../../tests/test-cases.md)。当前205项通过，包含用户依次确认的30项私人接纳、17项重试和50项诊断测试；共享、真实模型及存储专项仍待完成，不代表完整系统已通过验收。
 
 | 条款 | 验收条目 / 计划用例 | 验证归属 |
 | --- | --- | --- |

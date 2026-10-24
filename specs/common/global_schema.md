@@ -8,6 +8,8 @@
 
 字段名、类型、必填与空值以机器定义为准；跨字段、授权、时间和状态行为以本文及前后端 SDD 为准。生成 Pydantic/TypeScript 类型时保留 description 与约束，不另维护冲突定义。
 
+2026-10-24用户依次明确确认扩展DIAG-1.0、DIAG-TYPE-1和DIAG-TEST-1，见 [query-diagnostics.spec.md](../backend/query-diagnostics.spec.md)：WorkflowStatus增加可选query_diagnostics，输入Schema及CategoryResult保持不变。诊断只用于当前会话页面展示，不作为LLM输入、证据或风险结论。输出类型由Schema生成；全部205项测试通过，文案字典1.2.0新增独立query_diagnostics分组。
+
 2026-10-23用户明确确认文案扩展TEXT-1.1：字典版本1.1.0新增 `validation.input_invalid`（“输入格式不正确，请核对后重试。”），用于缺少专用提示的格式错误；Python ValidationMessageKey同步扩展，TypeScript从字典推导。核心输入/输出Schema及CONTRACT-1.0的业务字段、方法和其他规则保持不变；本扩展按契约变更记录，不将新增文案键隐作内部重构。
 
 ## DATA-01 主体、证据与未知
@@ -49,6 +51,7 @@
 | `summary_evidence_version` | `summary_text` 实际对应的分析输入版本；无成功报告则 null |
 | `summary_generated_at` | 成功报告取得时间；无成功报告则 null |
 | `llm_status` | 当前版本的分析状态，不代表旧报告状态 |
+| `query_diagnostics` | DIAG-1.0：可选五类当前失败诊断映射，缺省{}；未知不推断，成功重试删除对应诊断，单纯诊断变化不增加分析输入版本，不进入LLM |
 | `snapshot_status / snapshot_draft` | 共享查询情况与尚未接纳的预填充草稿 |
 | `last_submission` | 当前代次最近一次已接纳提交的历史回执；无则 null。共享保存结果不代表该记录此刻仍有效，当前 active/withdrawn 状态以会话的 ShareReceipt 为准 |
 

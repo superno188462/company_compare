@@ -4,7 +4,7 @@ import type {
   EditableDraft, SearchResult, ShareReceipt, UUID,
 } from "../contracts/boundary.js";
 import type {
-  Category, Evidence, QueryCoverage, Subject, WorkflowStatus,
+  Category, Evidence, QueryCoverage, QueryDiagnostics, Subject, WorkflowStatus,
 } from "../contracts/generated.js";
 import type { FieldErrors } from "../workspace/state.js";
 
@@ -29,6 +29,8 @@ export interface SubjectHeaderProps {
 export interface CoveragePanelProps {
   coverage: QueryCoverage;
   busy: boolean;
+  /** DIAG-1.0：仅展示本次失败诊断；缺失表示旧结果尚未记录。 */
+  diagnostics?: QueryDiagnostics;
   onRetry(categories: Category[]): void;
 }
 

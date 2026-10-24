@@ -430,6 +430,7 @@ export function App() {
         {payload !== null && (
           <CoveragePanel
             coverage={payload.api_status}
+            diagnostics={payload.api_status.query_diagnostics ?? {}}
             busy={actionBusy || activeOperation !== null}
             onRetry={(categories) => { void handleRetryQueries(categories); }}
           />

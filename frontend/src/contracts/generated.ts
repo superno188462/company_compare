@@ -444,6 +444,12 @@ export interface WorkflowStatus {
   planned_categories: PlannedCategories;
   categories: CategoryResults;
   /**
+   * DIAG-1.0：页面诊断；缺省为空对象，禁止进入LLM输入或证据。
+   */
+  query_diagnostics?: {
+    [k: string]: QueryDiagnostic;
+  };
+  /**
    * 公开定位标识；不能单独授权读取会话。
    */
   session_id: string;
@@ -474,6 +480,101 @@ export interface WorkflowStatus {
   last_submission: SubmissionReceipt | null;
 }
 /**
+ * DIAG-1.0：仅用于工作台展示的本次类别首次失败诊断，不是企业证据或LLM输入。所有枚举、字段和数量由受控代码生成，不承载上游原始文本。
+ *
+ * This interface was referenced by `undefined`'s JSON-Schema definition
+ * via the `patternProperty` "^(basic|abnormal|penalty|judicial|asset)$".
+ *
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "QueryDiagnostic".
+ *
+ * This interface was referenced by `QueryDiagnostics`'s JSON-Schema definition
+ * via the `patternProperty` "^(basic|abnormal|penalty|judicial|asset)$".
+ */
+export interface QueryDiagnostic {
+  /**
+   * 本次失败定位编号；不是授权凭据，幂等回放不变。
+   */
+  diagnostic_id: string;
+  /**
+   * 实际失败的固定工具名，无法确定时null，不从错误分类猜测。
+   */
+  tool_name:
+    | null
+    | "search_companies"
+    | "get_company_registration_info"
+    | "get_shareholder_info"
+    | "get_business_exception"
+    | "get_administrative_penalty"
+    | "get_dishonest_info"
+    | "get_judgment_debtor_info"
+    | "get_high_consumption_restriction"
+    | "get_judicial_case"
+    | "get_judicial_documents"
+    | "get_court_notice"
+    | "get_equity_freeze"
+    | "get_judicial_assistance"
+    | "get_chattel_mortgage_info"
+    | "get_land_mortgage_info";
+  /**
+   * 确定的失败环节，不代表企业风险。
+   */
+  phase: "configuration" | "request" | "response" | "pagination" | "record" | "aggregate" | "unknown";
+  /**
+   * 程序识别的已知触发原因；中文说明由固定字典定位，禁止任意上游原文。
+   */
+  reason_code:
+    | "PROVIDER_NOT_CONFIGURED"
+    | "AUTH_REQUIRED"
+    | "TOOL_ENTITLEMENT_REQUIRED"
+    | "RATE_OR_QUOTA_LIMIT"
+    | "REQUEST_TIMEOUT"
+    | "NETWORK_ERROR"
+    | "REQUEST_REJECTED"
+    | "SERVICE_UNAVAILABLE"
+    | "RESPONSE_INVALID"
+    | "PAGINATION_INVALID"
+    | "PAGINATION_CHANGED"
+    | "PAGINATION_INCOMPLETE"
+    | "RECORD_LIMIT_EXCEEDED"
+    | "CONTENT_LIMIT_EXCEEDED"
+    | "UPSTREAM_WARNING"
+    | "RECORD_INVALID"
+    | "SUBJECT_MISMATCH"
+    | "DUPLICATE_RECORDS"
+    | "UNCLASSIFIED_FAILURE";
+  /**
+   * 实际获知的HTTP状态，无响应或未知时null，不补为200。
+   */
+  http_status: number | null;
+  /**
+   * 受控字段定位，不包含实际字段值；不确定时null。
+   */
+  field:
+    | null
+    | "tool_name"
+    | "content"
+    | "sources"
+    | "items"
+    | "total"
+    | "pageNum"
+    | "pageSize"
+    | "record_id"
+    | "record_count"
+    | "record_credit_code"
+    | "source_url"
+    | "event_time"
+    | "source_publisher";
+  /**
+   * 已知的条数或字符数；单位由reason_code确定，未知时null。
+   */
+  actual_count: number | null;
+  /**
+   * 触发的应用条数或字符数上限，不代表上游授权额度；未知时null。
+   */
+  limit_count: number | null;
+}
+/**
  * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
  * via the `definition` "SnapshotDraft".
  */
@@ -482,4 +583,13 @@ export interface SnapshotDraft {
   evidence: OtherUserEvidence;
   shared_at: Timestamp;
   expires_at: Timestamp;
+}
+/**
+ * 当前失败类别到诊断的映射；成功、空、未查询类别不得保留旧诊断；旧payload可省略整个字段。
+ *
+ * This interface was referenced by `GeneratedContractBundle`'s JSON-Schema
+ * via the `definition` "QueryDiagnostics".
+ */
+export interface QueryDiagnostics {
+  [k: string]: QueryDiagnostic;
 }
